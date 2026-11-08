@@ -97,20 +97,21 @@ function page_env(): void
     $bk = '';
     foreach (array_slice(env_backups(), 0, 20) as $b) {
         $bn = basename($b);
-        $bk .= '<tr><td><code>' . h($bn) . '</code></td><td>' . h(fmt_time((int) filemtime($b))) . '</td><td><a href="?a=env&load=' . h(rawurlencode($bn)) . '">load into editor</a></td></tr>';
+        $bk .= '<tr><td><code>' . h($bn) . '</code></td><td style="white-space:nowrap">' . ago((int) filemtime($b)) . '</td><td><div class="row end"><a class="btn sm" href="?a=env&load=' . h(rawurlencode($bn)) . '">' . icon('download') . 'Load</a></div></td></tr>';
     }
     audit('env.view', 'Opened .env editor');
-    render('.env', '<h1>Environment (.env)</h1>' . $note
-        . ($cached ? '<div class="flash warn">Config is cached — changes take effect only after config:cache/config:clear (choose below).</div>' : '')
-        . '<form method="post" action="?a=env" class="card">' . csrf_field()
+    $lineCount = $content === '' ? 0 : substr_count($content, "\n") + 1;
+    render('.env', page_head('Environment', 'Edit ' . $f . ' — a timestamped backup is taken before every save.') . $note
+        . ($cached ? '<div class="flash warn">Config is cached — changes take effect only after config:cache / config:clear (choose below).</div>' : '')
+        . '<div class="grid-main"><form method="post" action="?a=env" class="card">' . csrf_field()
         . '<input type="hidden" name="op" value="save"><input type="hidden" name="hash" value="' . h($hash) . '">'
-        . '<p class="small mute"><code>' . h($f) . '</code> · a timestamped backup is taken before every save.</p>'
-        . '<textarea name="content" rows="28" spellcheck="false" autocomplete="off">' . h($content) . '</textarea>'
-        . '<div class="row" style="margin-top:10px"><label class="chk"><input type="checkbox" name="force" value="1"><span>Save even if validation reports problems</span></label></div>'
-        . '<div class="row"><select name="after" style="width:auto"><option value="config_cache"' . ($cached ? ' selected' : '') . '>then run config:cache</option>'
-        . '<option value="config_clear">then run config:clear</option><option value="none"' . ($cached ? '' : ' selected') . '>do nothing else</option></select>'
-        . '<button class="primary" type="submit" data-confirm="Write these changes to .env?">Save .env</button></div></form>'
-        . '<div class="card"><h2>Backups</h2>' . ($bk ? '<div class="tbl"><table>' . $bk . '</table></div>' : '<p class="mute">None yet.</p>') . '</div>');
+        . '<div class="card-h"><h2>' . icon('env') . '.env</h2><span class="small mute">' . $lineCount . ' lines</span></div>'
+        . '<textarea name="content" rows="28" spellcheck="false" autocomplete="off" aria-label=".env contents">' . h($content) . '</textarea>'
+        . '<div class="actions"><label class="chk" style="margin:0"><input type="checkbox" name="force" value="1"><span>Save even if validation reports problems</span></label>'
+        . '<div class="row" style="margin-left:auto"><select name="after" style="width:auto" aria-label="After saving"><option value="config_cache"' . ($cached ? ' selected' : '') . '>Then run config:cache</option>'
+        . '<option value="config_clear">Then run config:clear</option><option value="none"' . ($cached ? '' : ' selected') . '>Do nothing else</option></select>'
+        . '<button class="primary" type="submit" data-confirm="Write these changes to .env?">' . icon('check') . 'Save .env</button></div></div></form>'
+        . '<div class="card"><h2>' . icon('clock') . 'Backups</h2>' . ($bk ? '<div class="tbl"><table>' . $bk . '</table></div>' : empty_state('clock', 'No backups yet.')) . '</div></div>');
 }
 
 function do_env(): void

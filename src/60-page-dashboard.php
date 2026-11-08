@@ -35,34 +35,70 @@ function page_dashboard(): void
     }
 
     $rows = [
-        'Project root'    => '<code>' . h($root) . '</code>' . (is_dir($root) ? '' : ' ' . badge('missing', 'err')),
-        'Laravel'         => h(laravel_version()),
-        'PHP (CLI used)'  => '<code>' . h(php_bin()) . '</code>',
-        'Runs as'         => h(proc_user()),
-        'Git branch'      => $branch ? h($branch) . ($branch !== setting('branch') ? ' ' . badge('deploy branch: ' . setting('branch'), 'warn') : '') : badge('not a git repo', 'warn'),
-        'HEAD'            => $head ? h($head) : '—',
-        'Working tree'    => $isGit ? ($changes ? badge("$changes local change(s)", 'warn') : badge('clean', 'ok')) : '—',
-        'Maintenance'     => $down ? badge('DOWN', 'err') : badge('up', 'ok'),
-        'Git auth'        => h(setting('git_auth')),
-        'Disk free'       => is_dir($root) ? h(round((float) @disk_free_space($root) / 1073741824, 1) . ' GB') : '—',
+        'Project root'   => '<code>' . h($root) . '</code>' . (is_dir($root) ? '' : ' ' . badge('missing', 'err')),
+        'HEAD'           => $head ? h($head) : '<span class="mute">—</span>',
+        'Laravel'        => h(laravel_version()),
+        'PHP (CLI used)' => '<code>' . h(php_bin()) . '</code>',
+        'Runs as'        => h(proc_user()),
+        'Git auth'       => h(setting('git_auth')),
     ];
     $info = '';
     foreach ($rows as $k => $v) {
         $info .= '<tr><td class="k">' . h($k) . '</td><td>' . $v . '</td></tr>';
     }
+
     $deps = db()->query('SELECT * FROM deployments ORDER BY id DESC LIMIT 6')->fetchAll();
+    $last = $deps[0] ?? null;
+    $canDeploy = can('deploy');
     $dHtml = '';
     foreach ($deps as $d) {
-        $dHtml .= '<tr><td>#' . (int) $d['id'] . '</td><td>' . deploy_status_badge($d['status']) . '</td><td>' . h($d['actor'])
-            . '</td><td>' . h(fmt_time((int) $d['started_at'])) . '</td><td>' . (can('deploy') ? '<a href="?a=deploy_log&id=' . (int) $d['id'] . '">log</a>' : '') . '</td></tr>';
+        $tone = $d['status'] === 'success' ? 'ok' : ($d['status'] === 'failed' ? 'err' : 'warn');
+        $idTxt = '<b>' . h(ucfirst((string) $d['kind'])) . ' #' . (int) $d['id'] . '</b>';
+        $dHtml .= '<li><span class="dot ' . $tone . '"></span><span class="who">'
+            . ($canDeploy ? '<a href="?a=deploy_log&id=' . (int) $d['id'] . '">' . $idTxt . '</a>' : $idTxt)
+            . ' <span class="mute">by ' . h($d['actor']) . '</span></span>' . deploy_status_badge($d['status'])
+            . '<span class="when">' . ago((int) $d['started_at']) . '</span></li>';
     }
-    render('Dashboard', '<h1>Dashboard</h1>' . $warnHtml . '<div class="grid"><div class="card"><h2>Project</h2><div class="tbl"><table>' . $info
-        . '</table></div></div><div class="card"><h2>Recent deployments</h2>'
-        . ($dHtml ? '<div class="tbl"><table><tr><th>#</th><th>Status</th><th>By</th><th>Started</th><th></th></tr>' . $dHtml . '</table></div>' : '<p class="mute">None yet.</p>')
-        . (can('deploy') ? '<p><a class="btn" href="?a=deploy">Go to deploy →</a></p>' : '') . '</div></div>');
+
+    $freeGb = is_dir($root) ? round((float) @disk_free_space($root) / 1073741824, 1) : null;
+    $stats = '<div class="stats">'
+        . stat_tile('power', 'Application', $down ? 'Maintenance' : 'Online', $down ? 'artisan down is active' : 'Serving requests', $down ? 'err' : 'ok')
+        . stat_tile('branch', 'Git branch', $branch ? h($branch) : 'Not a repo',
+            $branch && $branch !== setting('branch') ? 'deploys <b>' . h(setting('branch')) . '</b>' : 'deploy branch: ' . h(setting('branch')),
+            !$isGit || ($branch && $branch !== setting('branch')) ? 'warn' : 'info')
+        . stat_tile('files', 'Working tree', !$isGit ? '—' : ($changes ? $changes . ' change' . ($changes === 1 ? '' : 's') : 'Clean'),
+            $changes ? 'uncommitted local edits' : 'matches HEAD', !$isGit ? '' : ($changes ? 'warn' : 'ok'))
+        . ($last
+            ? stat_tile('deploy', 'Last deployment', h(ucfirst((string) $last['status'])), ago((int) $last['started_at']) . ' by ' . h($last['actor']),
+                $last['status'] === 'success' ? 'ok' : ($last['status'] === 'failed' ? 'err' : 'info'))
+            : stat_tile('deploy', 'Last deployment', 'Never', 'no deployments yet'))
+        . stat_tile('disk', 'Disk free', $freeGb !== null ? h($freeGb . ' GB') : '—', 'on the project volume', $freeGb !== null && $freeGb < 2 ? 'warn' : '')
+        . '</div>';
+
+    $qa = '';
+    if ($canDeploy) {
+        $qa .= '<a class="btn primary" href="?a=deploy">' . icon('deploy') . 'Deploy now' . icon('arrow', 'go') . '</a>'
+            . '<form method="post" action="?a=deploy" data-once>' . csrf_field() . '<input type="hidden" name="op" value="check">'
+            . '<button type="submit">' . icon('refresh') . 'Check for updates' . icon('arrow', 'go') . '</button></form>';
+    }
+    foreach (['artisan' => ['artisan', 'Run artisan command'], 'terminal' => ['terminal', 'Open terminal'], 'env' => ['env', 'Edit environment'], 'keys' => ['keys', 'Manage SSH keys']] as $a => [$perm, $label]) {
+        if (can($perm)) {
+            $qa .= '<a class="btn" href="?a=' . $a . '">' . icon($a) . h($label) . icon('arrow', 'go') . '</a>';
+        }
+    }
+
+    $u = current_user();
+    render('Dashboard', page_head('Welcome back, ' . h($u['username']), 'Health of ' . basename($root) . ' at a glance.')
+        . $warnHtml . $stats
+        . '<div class="' . ($qa ? 'grid-main' : '') . '"><div class="stack"><div class="card"><h2>' . icon('dashboard') . 'Project</h2><div class="tbl"><table>' . $info . '</table></div></div>'
+        . '<div class="card"><div class="card-h"><h2>' . icon('clock') . 'Recent deployments</h2>'
+        . ($canDeploy && $deps ? '<a class="small" href="?a=deploy">View all</a>' : '') . '</div>'
+        . ($dHtml ? '<ul class="deps">' . $dHtml . '</ul>' : empty_state('deploy', 'No deployments yet.')) . '</div></div>'
+        . ($qa ? '<div class="card"><h2>' . icon('artisan') . 'Quick actions</h2><div class="qa">' . $qa . '</div></div>' : '')
+        . '</div>');
 }
 
 function deploy_status_badge(string $s): string
 {
-    return badge($s, $s === 'success' ? 'ok' : ($s === 'failed' ? 'err' : 'warn'));
+    return badge($s, $s === 'success' ? 'ok' : ($s === 'failed' ? 'err' : ($s === 'running' ? 'run' : 'warn')));
 }

@@ -54,21 +54,25 @@ function artisan_catalog(): array
 
 function page_artisan(): void
 {
-    $html = '<h1>Artisan</h1><div class="stack">';
+    $icons = ['Deployment' => 'deploy', 'Optimise & caches' => 'artisan', 'Queue' => 'list', 'Information' => 'search'];
+    $html = page_head('Artisan', 'Run common php artisan commands with one click. Commands marked in red ask for confirmation first.')
+        . '<form method="post" action="?a=artisan" data-once class="card">' . csrf_field()
+        . '<input type="hidden" name="op" value="custom"><h2>' . icon('terminal') . 'Run any command</h2><div class="row">'
+        . '<div class="cmdline"><span>php artisan</span><input type="text" name="args" placeholder="cache:forget some-key" required maxlength="500" aria-label="Artisan arguments" autocomplete="off" spellcheck="false"></div>'
+        . '<button class="primary" type="submit">' . icon('arrow') . 'Run</button></div>'
+        . '<p class="hint">Runs without a shell (arguments are passed literally). Blocked: ' . h(implode(', ', DPLY_ARTISAN_DENY)) . '.</p></form>'
+        . '<div class="row" style="margin:6px 0 18px"><div class="searchbox">' . icon('search')
+        . '<input type="text" data-search=".acmd" placeholder="Filter commands…" aria-label="Filter commands" autocomplete="off"></div>'
+        . '<span class="small mute">Press <kbd>/</kbd> to search</span></div>';
     foreach (artisan_catalog() as $group => $cmds) {
-        $html .= '<div class="card"><h2>' . h($group) . '</h2><div class="agrid">';
+        $html .= '<div class="card" data-group><h2>' . icon($icons[$group] ?? 'artisan') . h($group) . ' <span class="badge">' . count($cmds) . '</span></h2><div class="agrid">';
         foreach ($cmds as $k => [$label, , $confirm]) {
-            $html .= '<form method="post" action="?a=artisan" data-once' . ($confirm ? ' data-confirm="' . h($confirm) . '"' : '') . '>' . csrf_field()
+            $html .= '<form method="post" action="?a=artisan" class="acmd" data-once' . ($confirm ? ' data-confirm="' . h($confirm) . '"' : '') . '>' . csrf_field()
                 . '<input type="hidden" name="op" value="run"><input type="hidden" name="cmd" value="' . h($k) . '">'
-                . '<button type="submit"' . ($confirm ? ' class="danger"' : '') . '>' . h($label) . '</button></form>';
+                . '<button type="submit"' . ($confirm ? ' class="danger" title="' . h($confirm) . '"' : '') . '>' . icon($confirm ? 'alert' : 'arrow') . h($label) . '</button></form>';
         }
         $html .= '</div></div>';
     }
-    $html .= '<div class="card"><h2>Custom command</h2><form method="post" action="?a=artisan" data-once>' . csrf_field()
-        . '<input type="hidden" name="op" value="custom"><div class="row"><code>php artisan</code>'
-        . '<input type="text" name="args" placeholder="e.g. cache:forget some-key" required maxlength="500" style="flex:1;min-width:200px">'
-        . '<button class="primary" type="submit">Run</button></div>'
-        . '<p class="small mute">Runs without a shell (arguments are passed literally). Blocked: ' . h(implode(', ', DPLY_ARTISAN_DENY)) . '.</p></form></div></div>';
     render('Artisan', $html);
 }
 
@@ -109,5 +113,5 @@ function do_artisan(): void
     stream_out('$ ' . cmd_display($cmd) . "\n\n");
     $r = run_proc($cmd, project_root(), proc_env(), cmd_timeout(), 'stream_out');
     stream_out(($r['timeout'] ? "\n[timed out]" : '') . "\n[exit {$r['code']}]\n");
-    stream_end('<p class="row" style="margin-top:12px"><a class="btn" href="?a=artisan">← Back to artisan</a></p>');
+    stream_end(back_link('?a=artisan', 'Back to artisan'));
 }

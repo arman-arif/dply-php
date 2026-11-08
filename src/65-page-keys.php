@@ -33,40 +33,39 @@ function list_keys(): array
 function page_keys(): void
 {
     $active = setting('ssh_key');
-    $html = '<h1>SSH keys</h1>';
+    $html = page_head('SSH keys', 'Add a key\'s public part to your repository as a read-only deploy key, mark it active, and set Git auth to ssh in Settings.');
     if (!find_bin('ssh-keygen')) {
         $html .= '<div class="flash err">ssh-keygen was not found in PATH — install openssh-client.</div>';
     }
-    $html .= '<p class="mute">Keys live in <code>' . h(ssh_key_dir()) . '</code> (0600). Add a key\'s public part to your repository as a read-only '
-        . '<em>deploy key</em>, select it as active and set Git auth to <code>ssh</code> in Settings.</p>';
+    $keysHtml = '';
     foreach (list_keys() as $name => $k) {
         $isActive = $name === $active;
-        $html .= '<div class="card"><div class="row" style="justify-content:space-between"><h2 style="margin:0">' . h($name) . ' ' . ($isActive ? badge('active', 'ok') : '') . '</h2>'
-            . '<div class="row">'
-            . ($isActive ? '' : '<form method="post" action="?a=keys">' . csrf_field() . '<input type="hidden" name="op" value="activate"><input type="hidden" name="name" value="' . h($name) . '"><button class="sm" type="submit">Use for git</button></form>')
+        $keysHtml .= '<div class="card"><div class="ucard-h"><div class="key-ic' . ($isActive ? ' on' : '') . '">' . icon('keys') . '</div><div class="n"><b>' . h($name) . ' ' . ($isActive ? badge('active for git', 'ok') : '') . '</b>'
+            . '<small><code>' . h($k['fp']) . '</code> · created ' . ago($k['mtime']) . '</small></div><div class="row">'
+            . ($isActive ? '' : '<form method="post" action="?a=keys">' . csrf_field() . '<input type="hidden" name="op" value="activate"><input type="hidden" name="name" value="' . h($name) . '"><button class="sm" type="submit">' . icon('check') . 'Use for git</button></form>')
             . '<form method="post" action="?a=keys" data-confirm="Delete key ' . h($name) . ' permanently?">' . csrf_field() . '<input type="hidden" name="op" value="delete"><input type="hidden" name="name" value="' . h($name) . '"><button class="sm danger" type="submit">Delete</button></form>'
-            . '</div></div><p class="small mute">' . h($k['fp']) . ' · created ' . h(fmt_time($k['mtime'])) . '</p>'
-            . '<textarea rows="3" readonly>' . h($k['pub']) . '</textarea></div>';
+            . '</div></div><label style="margin:0"><span>Public key — paste this into your repository\'s deploy keys</span><textarea rows="3" readonly>' . h($k['pub']) . '</textarea></label></div>';
     }
+    $html .= $keysHtml !== '' ? $keysHtml : '<div class="card">' . empty_state('keys', 'No SSH keys yet. Generate one below or import an existing key.') . '</div>';
     $kh = is_file(known_hosts()) ? (string) file_get_contents(known_hosts()) : '';
     $html .= '<div class="grid">'
-        . '<form method="post" action="?a=keys" class="card">' . csrf_field() . '<h2>Generate new key (ed25519)</h2><input type="hidden" name="op" value="generate">'
+        . '<form method="post" action="?a=keys" class="card">' . csrf_field() . '<h2>' . icon('plus') . 'Generate new key <span class="badge">ed25519</span></h2><input type="hidden" name="op" value="generate">'
         . '<label><span>Name</span><input type="text" name="name" value="deploy_' . date('Ymd') . '" pattern="[A-Za-z0-9_][A-Za-z0-9_.\-]{0,63}" required></label>'
         . '<label><span>Comment</span><input type="text" name="comment" value="dply@' . h((string) (gethostname() ?: 'server')) . '" maxlength="100"></label>'
-        . '<button class="primary" type="submit">Generate</button></form>'
-        . '<form method="post" action="?a=keys" class="card">' . csrf_field() . '<h2>Import existing private key</h2><input type="hidden" name="op" value="import">'
+        . '<button class="primary" type="submit">' . icon('plus') . 'Generate key</button></form>'
+        . '<form method="post" action="?a=keys" class="card">' . csrf_field() . '<h2>' . icon('download') . 'Import existing private key</h2><input type="hidden" name="op" value="import">'
         . '<label><span>Name</span><input type="text" name="name" pattern="[A-Za-z0-9_][A-Za-z0-9_.\-]{0,63}" required></label>'
-        . '<label><span>Private key (OpenSSH/PEM, without passphrase)</span><textarea name="private" rows="6" required spellcheck="false" autocomplete="off"></textarea></label>'
-        . '<button type="submit">Import</button></form>'
-        . '<div class="card"><h2>Known hosts &amp; connection test</h2>'
-        . '<form method="post" action="?a=keys" class="row">' . csrf_field() . '<input type="hidden" name="op" value="scan">'
-        . '<input type="text" name="host" placeholder="github.com or host:port" required style="flex:1;min-width:160px"><button type="submit">Add host key</button></form>'
-        . '<form method="post" action="?a=keys" class="row" style="margin-top:8px">' . csrf_field() . '<input type="hidden" name="op" value="test">'
-        . '<input type="text" name="target" placeholder="git@github.com" value="git@github.com" required style="flex:1;min-width:160px"><button type="submit">Test active key</button></form>'
-        . '<p class="small mute">Unknown hosts are trusted on first use (accept-new) and recorded below.</p>'
-        . '<pre class="small">' . h($kh !== '' ? $kh : '(empty)') . '</pre>'
-        . ($kh !== '' ? '<form method="post" action="?a=keys" data-confirm="Clear all known host keys?" style="margin-top:8px">' . csrf_field() . '<input type="hidden" name="op" value="clear_hosts"><button class="sm danger" type="submit">Clear known hosts</button></form>' : '')
-        . '</div></div>';
+        . '<label><span>Private key (OpenSSH/PEM, without passphrase)</span><textarea name="private" rows="5" required spellcheck="false" autocomplete="off" placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"></textarea></label>'
+        . '<button type="submit">' . icon('download') . 'Import key</button></form></div>'
+        . '<div class="card"><div class="card-h"><h2>' . icon('security') . 'Known hosts &amp; connection test</h2>'
+        . ($kh !== '' ? '<form method="post" action="?a=keys" data-confirm="Clear all known host keys?">' . csrf_field() . '<input type="hidden" name="op" value="clear_hosts"><button class="sm danger" type="submit">Clear known hosts</button></form>' : '')
+        . '</div><div class="grid" style="margin-bottom:14px">'
+        . '<form method="post" action="?a=keys">' . csrf_field() . '<input type="hidden" name="op" value="scan"><label><span>Trust a host</span><div class="row">'
+        . '<input type="text" name="host" placeholder="github.com or host:port" required style="flex:1;min-width:160px"><button type="submit">' . icon('plus') . 'Add host key</button></div></label></form>'
+        . '<form method="post" action="?a=keys">' . csrf_field() . '<input type="hidden" name="op" value="test"><label><span>Test the active key</span><div class="row">'
+        . '<input type="text" name="target" placeholder="git@github.com" value="git@github.com" required style="flex:1;min-width:160px"><button type="submit">' . icon('sync') . 'Test connection</button></div></label></form></div>'
+        . '<p class="hint" style="margin:0 0 10px">Unknown hosts are trusted on first use (accept-new) and recorded below.</p>'
+        . '<pre class="small">' . h($kh !== '' ? $kh : '(empty)') . '</pre></div>';
     render('SSH keys', $html);
 }
 

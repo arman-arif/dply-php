@@ -9,10 +9,10 @@ declare(strict_types=1);
 function page_login(): void
 {
     render_bare('Sign in', '<form method="post" action="?a=login" class="card login">' . csrf_field()
-        . '<h1>DPLY — sign in</h1>'
-        . '<label><span>Username</span><input type="text" name="username" autocomplete="username" required autofocus maxlength="64"></label>'
-        . '<label><span>Password</span><input type="password" name="password" autocomplete="current-password" required></label>'
-        . '<button class="primary" type="submit">Sign in</button></form>', true);
+        . '<h1>Welcome back</h1><p class="lead">Sign in to manage deployments.</p>'
+        . '<label><span>Username</span><input type="text" name="username" autocomplete="username" required autofocus maxlength="64" placeholder="your.username"></label>'
+        . '<label><span>Password</span><input type="password" name="password" autocomplete="current-password" required placeholder="••••••••••••"></label>'
+        . '<button class="primary" type="submit">Sign in ' . icon('arrow') . '</button></form><p class="auth-foot">' . icon('lock', 'small') . ' Protected console · all actions are audited</p>', true);
 }
 
 function find_user(string $username): ?array
@@ -101,9 +101,9 @@ function page_login_2fa(): void
         redirect('?a=login');
     }
     render_bare('Two-factor', '<form method="post" action="?a=login_2fa" class="card login">' . csrf_field()
-        . '<h1>Two-factor code</h1><p class="mute">Enter the 6-digit code from your authenticator app.</p>'
-        . '<label><span>Code</span><input type="text" name="code" inputmode="numeric" pattern="[0-9 ]{6,7}" autocomplete="one-time-code" required autofocus></label>'
-        . '<button class="primary" type="submit">Verify</button> <a href="?a=login">Cancel</a></form>', true);
+        . '<h1>Two-factor verification</h1><p class="lead">Enter the 6-digit code from your authenticator app.</p>'
+        . '<label><span>Authentication code</span><input type="text" name="code" class="otp" inputmode="numeric" pattern="[0-9 ]{6,7}" maxlength="7" placeholder="000000" autocomplete="one-time-code" required autofocus></label>'
+        . '<button class="primary" type="submit">Verify ' . icon('arrow') . '</button><p class="auth-foot" style="margin-bottom:0"><a href="?a=login">' . icon('back', 'small') . ' Back to sign in</a></p></form>', true);
 }
 
 function do_login_2fa(): void
@@ -139,11 +139,12 @@ function page_reauth(): void
 {
     $ret = safe_return((string) ($_GET['return'] ?? '?a=dashboard'));
     render('Confirm password', '<form method="post" action="?a=reauth" class="card login">' . csrf_field()
-        . '<h1>Confirm your password</h1><p class="mute">This area is sensitive. Re-enter your password to continue '
-        . '(valid for ' . (int) ceil((int) setting('sudo_ttl') / 60) . ' minutes).</p>'
+        . '<div class="key-ic on" style="margin-bottom:16px">' . icon('lock') . '</div>'
+        . '<h1>Confirm your password</h1><p class="lead">This area is sensitive. Re-enter your password to continue — '
+        . 'you won\'t be asked again for ' . (int) ceil((int) setting('sudo_ttl') / 60) . ' minutes.</p>'
         . '<input type="hidden" name="return" value="' . h($ret) . '">'
         . '<label><span>Password</span><input type="password" name="password" autocomplete="current-password" required autofocus></label>'
-        . '<button class="primary" type="submit">Confirm</button></form>');
+        . '<button class="primary" type="submit">Continue ' . icon('arrow') . '</button></form>');
 }
 
 function do_reauth(): void

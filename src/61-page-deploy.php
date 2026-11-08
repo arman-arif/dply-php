@@ -18,8 +18,8 @@ function page_deploy(): void
 
     $statusHtml = $status === '' ? badge('clean', 'ok')
         : badge(count(explode("\n", $status)) . ' local change(s)', 'warn')
-        . '<pre class="small">' . h(implode("\n", array_slice(explode("\n", $status), 0, 40))) . '</pre>'
-        . '<p class="small mute">With the "reset" strategy these tracked changes are overwritten on deploy.</p>';
+        . '<pre class="small" style="margin-top:10px;max-height:220px">' . h(implode("\n", array_slice(explode("\n", $status), 0, 40))) . '</pre>'
+        . '<p class="hint">With the "reset" strategy these tracked changes are overwritten on deploy.</p>';
 
     $deps = db()->query('SELECT id, actor, kind, branch, status, commit_before, commit_after, started_at, finished_at FROM deployments ORDER BY id DESC LIMIT 30')->fetchAll();
     $hist = '';
@@ -30,36 +30,48 @@ function page_deploy(): void
             $rb = '<form method="post" action="?a=deploy" data-once data-confirm="Roll back the code to ' . h(substr($d['commit_before'], 0, 12))
                 . ' and re-run your default post-deploy steps? Database migrations are NOT reverted.">' . csrf_field()
                 . '<input type="hidden" name="op" value="rollback"><input type="hidden" name="id" value="' . (int) $d['id'] . '">'
-                . '<button class="sm danger" type="submit">Roll back to before</button></form>';
+                . '<button class="sm danger" type="submit" title="Roll back to the commit before this deployment">' . icon('back') . 'Roll back</button></form>';
         }
-        $hist .= '<tr><td>#' . (int) $d['id'] . '</td><td>' . h($d['kind']) . '</td><td>' . deploy_status_badge($d['status']) . '</td><td>' . h($d['actor'])
-            . '</td><td><code>' . h(substr((string) $d['commit_before'], 0, 8) ?: '—') . '</code> → <code>' . h(substr((string) $d['commit_after'], 0, 8) ?: '—') . '</code></td><td>'
-            . h(fmt_time((int) $d['started_at'])) . '</td><td>' . h($dur) . '</td><td class="row"><a href="?a=deploy_log&id=' . (int) $d['id'] . '">log</a>' . $rb . '</td></tr>';
+        $hist .= '<tr><td><a href="?a=deploy_log&id=' . (int) $d['id'] . '"><b>#' . (int) $d['id'] . '</b></a></td><td>' . h(ucfirst((string) $d['kind'])) . '</td><td>' . deploy_status_badge($d['status'])
+            . '</td><td><span class="row" style="flex-wrap:nowrap;gap:8px">' . avatar((string) $d['actor']) . h($d['actor']) . '</span></td><td style="white-space:nowrap"><code>' . h(substr((string) $d['commit_before'], 0, 8) ?: '—')
+            . '</code> <span class="mute">→</span> <code>' . h(substr((string) $d['commit_after'], 0, 8) ?: '—') . '</code></td><td style="white-space:nowrap">'
+            . ago((int) $d['started_at']) . '</td><td>' . h($dur) . '</td><td><div class="row end"><a class="btn sm" href="?a=deploy_log&id=' . (int) $d['id'] . '">View log</a>' . $rb . '</div></td></tr>';
     }
 
-    render('Deploy', '<h1>Deploy</h1><div class="grid">'
-        . '<div class="card"><h2>Current state</h2><div class="tbl"><table>'
-        . '<tr><td class="k">Repository</td><td>' . ($remote ? '<code>' . h($remote) . '</code>' : badge('not configured', 'warn')) . '</td></tr>'
-        . '<tr><td class="k">Deploy branch</td><td><code>' . h($branch) . '</code></td></tr>'
-        . '<tr><td class="k">Auth</td><td>' . h(setting('git_auth')) . (setting('git_auth') === 'ssh' ? ' (' . h(setting('ssh_key') ?: 'no key selected') . ')' : '') . '</td></tr>'
-        . '<tr><td class="k">Strategy</td><td>' . (setting('sync_strategy') === 'ff' ? 'fast-forward only' : 'force-sync (reset to remote)') . '</td></tr>'
-        . '<tr><td class="k">HEAD</td><td>' . ($head ? h($subject) . '<br><span class="mute small">' . h($meta) . ' · <code>' . h(substr($hash, 0, 12)) . '</code></span>' : '—') . '</td></tr>'
-        . '<tr><td class="k">Working tree</td><td>' . ($isGit ? $statusHtml : badge('not a git repo yet — first deploy will initialise it in place', 'warn')) . '</td></tr>'
-        . '</table></div>'
-        . '<form method="post" action="?a=deploy" data-once class="row" style="margin-top:12px">' . csrf_field()
-        . '<input type="hidden" name="op" value="check"><button type="submit">Check for updates</button></form></div>'
-        . '<div class="card"><h2>Deploy now</h2><form method="post" action="?a=deploy" data-once data-confirm="Deploy origin/' . h($branch) . ' now?">' . csrf_field()
-        . '<input type="hidden" name="op" value="deploy"><p class="mute small">1. fetch origin/' . h($branch) . ' → 2. sync files → 3. selected steps:</p>'
-        . steps_checkboxes(default_steps()) . '<p><button class="primary" type="submit">Deploy</button></p></form></div></div>'
-        . '<div class="card"><h2>History</h2>' . ($hist ? '<div class="tbl"><table><tr><th>#</th><th>Type</th><th>Status</th><th>By</th><th>Commits</th><th>Started</th><th>Took</th><th></th></tr>'
-            . $hist . '</table></div>' : '<p class="mute">No deployments yet.</p>') . '</div>');
+    $checkBtn = '<form method="post" action="?a=deploy" data-once>' . csrf_field()
+        . '<input type="hidden" name="op" value="check"><button type="submit">' . icon('refresh') . 'Check for updates</button></form>';
+    $kv = [
+        'Repository'    => $remote ? '<code>' . h($remote) . '</code>' : badge('not configured', 'warn'),
+        'Deploy branch' => '<code>' . h($branch) . '</code>',
+        'Auth'          => h(setting('git_auth')) . (setting('git_auth') === 'ssh' ? ' <span class="mute">(' . h(setting('ssh_key') ?: 'no key selected') . ')</span>' : ''),
+        'Strategy'      => setting('sync_strategy') === 'ff' ? 'Fast-forward only' : 'Force-sync (reset to remote)',
+        'HEAD'          => $head ? h($subject) . '<br><span class="mute small">' . h($meta) . ' · <code>' . h(substr($hash, 0, 12)) . '</code></span>' : '—',
+        'Working tree'  => $isGit ? $statusHtml : badge('not a git repo yet — first deploy will initialise it in place', 'warn'),
+    ];
+    $kvHtml = '';
+    foreach ($kv as $k => $v) {
+        $kvHtml .= '<dt>' . h($k) . '</dt><dd>' . $v . '</dd>';
+    }
+
+    render('Deploy', page_head('Deploy', 'Pull the latest code from origin/' . $branch . ' and run your post-deploy steps.', $checkBtn)
+        . '<div class="grid-main">'
+        . '<form method="post" action="?a=deploy" class="card" data-once data-confirm="Deploy origin/' . h($branch) . ' to this server now?">' . csrf_field()
+        . '<input type="hidden" name="op" value="deploy"><h2>' . icon('deploy') . 'Deploy now</h2>'
+        . '<ol class="pipeline"><li><b>Fetch</b>origin/' . h($branch) . '</li><li><b>Sync</b>update files</li><li><b>Run steps</b>selected below</li></ol>'
+        . '<div class="sub-h" style="margin-top:0">Post-deploy steps</div>' . steps_checkboxes(default_steps())
+        . '<p class="hint">Defaults come from Settings. Untick anything you want to skip for this run.</p>'
+        . '<div class="actions"><button class="primary btn-lg" type="submit">' . icon('deploy') . 'Deploy ' . h($branch) . '</button></div></form>'
+        . '<div class="card"><h2>' . icon('branch') . 'Current state</h2><dl class="kv">' . $kvHtml . '</dl></div></div>'
+        . '<div class="card"><div class="card-h"><h2>' . icon('clock') . 'History</h2><span class="small mute">Last 30 runs</span></div>'
+        . ($hist ? '<div class="tbl"><table><tr><th>#</th><th>Type</th><th>Status</th><th>By</th><th>Commits</th><th>Started</th><th>Took</th><th></th></tr>'
+            . $hist . '</table></div>' : empty_state('deploy', 'No deployments yet — your first run will appear here.')) . '</div>');
 }
 
 function do_deploy(): void
 {
     $op = (string) ($_POST['op'] ?? '');
     $actor = current_user()['username'];
-    $back = '<p class="row" style="margin-top:12px"><a class="btn" href="?a=deploy">← Back to deploy</a></p>';
+    $back = back_link('?a=deploy', 'Back to deploy');
 
     if ($op === 'check') {
         $root = project_root();
@@ -117,7 +129,7 @@ function do_deploy(): void
         }
         stream_begin($op === 'deploy' ? 'Deploying' : 'Rolling back');
         $r = deploy_run($actor, $steps, $target, 'stream_out');
-        stream_end('<div class="flash ' . ($r['ok'] ? 'ok' : 'err') . '" style="margin-top:12px">' . h($r['msg'])
+        stream_end('<div class="flash ' . ($r['ok'] ? 'ok' : 'err') . '">' . h($r['msg'])
             . ($r['id'] ? ' <a href="?a=deploy_log&id=' . $r['id'] . '">Permanent log #' . $r['id'] . '</a>' : '') . '</div>' . $back);
         return;
     }
@@ -133,8 +145,10 @@ function page_deploy_log(): void
         flash('err', 'Deployment not found.');
         redirect('?a=deploy');
     }
-    render('Deployment #' . $d['id'], '<h1>' . h(ucfirst($d['kind'])) . ' #' . (int) $d['id'] . ' ' . deploy_status_badge($d['status']) . '</h1>'
-        . '<p class="mute">By ' . h($d['actor']) . ' · ' . h(fmt_time((int) $d['started_at'])) . ' → ' . h(fmt_time((int) $d['finished_at']))
-        . ' · steps: ' . h((string) $d['steps']) . '</p><pre class="log">' . h((string) $d['log']) . '</pre>'
-        . '<p style="margin-top:12px"><a class="btn" href="?a=deploy">← Back</a></p>');
+    $dur = $d['finished_at'] ? ((int) $d['finished_at'] - (int) $d['started_at']) . 's' : null;
+    render('Deployment #' . $d['id'], page_head(h(ucfirst($d['kind'])) . ' #' . (int) $d['id'] . ' ' . deploy_status_badge($d['status']),
+        'By ' . $d['actor'] . ' · started ' . fmt_time((int) $d['started_at']) . ($dur !== null ? ' · took ' . $dur : ''),
+        '<a class="btn" href="?a=deploy">' . icon('back') . 'All deployments</a>')
+        . '<div class="tips"><span>' . icon('list') . 'Steps: ' . h(str_replace(',', ', ', (string) $d['steps'])) . '</span></div>'
+        . '<pre class="log">' . h((string) $d['log']) . '</pre>');
 }

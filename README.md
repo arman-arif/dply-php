@@ -28,7 +28,7 @@ No agents, no build pipeline and no external services. Everything runs as the PH
 
 ## Installation
 
-DPLY is the single file `index.php`. Put it in its own directory that is **not** inside your app's `public/` folder.
+DPLY is the single file `public/index.php`. Put the DPLY directory somewhere that is **not** inside your app's `public/` folder; only DPLY's own `public/` directory is exposed to the web.
 
 **1. Get the file onto the server.** For example, inside a Laravel app:
 
@@ -42,7 +42,7 @@ You can also clone it anywhere else and point it at your app during setup.
 **2. Run setup on the command line**, as the user PHP runs as. Setup is CLI-only, so nobody can claim the console over the web first.
 
 ```bash
-sudo -u www-data php app/tool/dply/index.php setup
+sudo -u www-data php app/tool/dply/public/index.php setup
 ```
 
 It asks for:
@@ -51,19 +51,15 @@ It asks for:
 - an HTTP Basic auth username and password (the outer gate),
 - the first administrator account.
 
-**3. Expose it over HTTPS.** Either point a dedicated (sub)domain at the DPLY directory, or symlink it into your app's `public/`:
+**3. Expose it over HTTPS.** Either point a dedicated (sub)domain at DPLY's `public/` directory, or symlink it into your app's `public/`:
 
 ```bash
-ln -s ../app/tool/dply public/dply
+ln -s ../app/tool/dply/public public/dply
 ```
 
-**On Apache** nothing else is needed: generated `.htaccess` files allow only `index.php` and deny the `data/` directory.
+**On Apache** nothing else is needed: a generated `public/.htaccess` allows only `index.php`. The `data/` directory sits outside `public/`, so it is never web-reachable.
 
-**On nginx**, deny everything except `index.php`, for example:
-
-```nginx
-location ~ ^/dply/(?!index\.php) { deny all; }
-```
+**On nginx**, use [`nginx.conf.example`](nginx.conf.example). It has two ready-made options: a dedicated (sub)domain, or a `/dply/` sub-path inside your Laravel app's server block. Both serve only `index.php`, allow long deployments (`fastcgi_read_timeout`), and turn off buffering so deploy output streams live.
 
 **4. Sign in and configure.** Pass the HTTP auth prompt, sign in with your admin account, then open **Settings** to set the repository URL, branch and authentication. Use **Save & test repository access** to check it.
 
@@ -122,7 +118,7 @@ Policy values (attempts, block durations, session lifetimes) are configurable un
 Run commands as the PHP user:
 
 ```bash
-php index.php <command>
+php public/index.php <command>
 ```
 
 | Command                                                        | Purpose                                            |
@@ -144,15 +140,15 @@ php index.php <command>
 Project-specific commands act on the first project unless you pass `--project=<slug>`:
 
 ```bash
-php index.php deploy --project=shop-api
-php index.php deploy --project=shop-api --steps=composer,migrate,config_cache
+php public/index.php deploy --project=shop-api
+php public/index.php deploy --project=shop-api --steps=composer,migrate,config_cache
 ```
 
 That makes it easy to deploy from cron or a CI job over SSH.
 
 ## Runtime data
 
-Everything DPLY stores lives in `data/` next to `index.php`. To keep it elsewhere, set the `DPLY_DATA_DIR` environment variable.
+Everything DPLY stores lives in `data/` in the DPLY directory (next to `public/`, outside the web root). To keep it elsewhere, set the `DPLY_DATA_DIR` environment variable.
 
 - `sqlite.db`: settings, projects, users, deployments, audit log
 - `keys/`: encryption key, SSH keys, known hosts
@@ -163,19 +159,19 @@ Back this directory up, and never serve it over the web. It is in `.gitignore`.
 
 ## Development
 
-The source is split into modules in `src/`, which are compiled into the single deployable `index.php`. Modules are concatenated in filename order; `00-bootstrap.php` comes first and `99-run.php` last.
+The source is split into modules in `src/`, which are compiled into the single deployable `public/index.php`. Modules are concatenated in filename order; `00-bootstrap.php` comes first and `99-run.php` last.
 
 ```bash
-php build.php           # rebuild index.php (lints before writing)
-php build.php --check   # exit 1 if index.php is out of date (CI / pre-commit)
+php build.php           # rebuild public/index.php (lints before writing)
+php build.php --check   # exit 1 if public/index.php is out of date (CI / pre-commit)
 ```
 
-Edit files in `src/`, never `index.php` directly, and commit the rebuilt `index.php` together with your changes.
+Edit files in `src/`, never `public/index.php` directly, and commit the rebuilt `public/index.php` together with your changes.
 
 To try it locally:
 
 ```bash
 mkdir -p /tmp/dply-data
-DPLY_DATA_DIR=/tmp/dply-data php index.php setup
+DPLY_DATA_DIR=/tmp/dply-data php public/index.php setup
 DPLY_DATA_DIR=/tmp/dply-data php -S 127.0.0.1:8080
 ```

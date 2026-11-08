@@ -1,0 +1,117 @@
+# ============================================================================
+#  DPLY — nginx configuration
+# ============================================================================
+#  Only DPLY's public/ directory may be served, and inside it only index.php.
+#  data/ sits outside public/, so it can never be reached over the web.
+#
+#  Pick ONE of the two options below and adjust:
+#    - server_name / paths (/var/www/myapp/app/tool/dply is used here)
+#    - the PHP-FPM socket (fastcgi_pass), e.g. unix:/run/php/php8.3-fpm.sock
+#    - the TLS certificate paths
+#  Then: sudo nginx -t && sudo systemctl reload nginx
+#
+#  Notes:
+#    - fastcgi_read_timeout is raised so long deployments are not cut off.
+#    - fastcgi_buffering is off so deploy output streams live to the browser
+#      (DPLY also sends "X-Accel-Buffering: no").
+#    - nginx passes the Authorization header to PHP-FPM by default, which the
+#      HTTP Basic auth gate needs. No extra config is required.
+#    - Behind a load balancer/proxy, enable "Trust proxy" in DPLY settings so
+#      the real client IP and HTTPS are detected.
+# ============================================================================
+
+
+# ----------------------------------------------------------------------------
+#  OPTION A — dedicated (sub)domain, e.g. https://deploy.example.com/
+# ----------------------------------------------------------------------------
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name deploy.example.com;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    http2 on;
+    server_name deploy.example.com;
+
+    ssl_certificate     /etc/letsencrypt/live/deploy.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/deploy.example.com/privkey.pem;
+
+    root /var/www/myapp/app/tool/dply/public;
+    index index.php;
+
+    client_max_body_size 8m;
+    server_tokens off;
+
+    add_header X-Content-Type-Options nosniff always;
+    add_header X-Frame-Options DENY always;
+    add_header Referrer-Policy same-origin always;
+
+    # Everything goes to index.php …
+    location = / {
+        include fastcgi_params;
+        fastcgi_param SCRIPT_FILENAME $realpath_root/index.php;
+        fastcgi_param SCRIPT_NAME     /index.php;
+        fastcgi_pass unix:/run/php/php8.3-fpm.sock;
+        fastcgi_read_timeout 3600s;
+        fastcgi_buffering off;
+    }
+
+    location = /index.php {
+        include fastcgi_params;
+        fastcgi_param SCRIPT_FILENAME $realpath_root/index.php;
+        fastcgi_param SCRIPT_NAME     /index.php;
+        fastcgi_pass unix:/run/php/php8.3-fpm.sock;
+        fastcgi_read_timeout 3600s;
+        fastcgi_buffering off;
+    }
+
+    # … and nothing else (.htaccess, stray files) is served.
+    location / {
+        return 404;
+    }
+}
+
+
+# ----------------------------------------------------------------------------
+#  OPTION B — sub-path of your Laravel app, e.g. https://example.com/dply/
+#
+#  Symlink DPLY's public/ into the app's public/ first:
+#      cd /var/www/myapp && ln -s ../app/tool/dply/public public/dply
+#
+#  Then add these blocks INSIDE your app's existing `server { … }` (443) block,
+#  above Laravel's `location /` and `location ~ \.php$` blocks. The ^~ prefix
+#  makes them win over Laravel's regex locations.
+# ----------------------------------------------------------------------------
+
+# location = /dply {
+#     return 301 /dply/;
+# }
+#
+# location ^~ /dply/ {
+#     location = /dply/ {
+#         include fastcgi_params;
+#         fastcgi_param SCRIPT_FILENAME $document_root/dply/index.php;
+#         fastcgi_param SCRIPT_NAME     /dply/index.php;
+#         fastcgi_pass unix:/run/php/php8.3-fpm.sock;
+#         fastcgi_read_timeout 3600s;
+#         fastcgi_buffering off;
+#     }
+#
+#     location = /dply/index.php {
+#         include fastcgi_params;
+#         fastcgi_param SCRIPT_FILENAME $document_root/dply/index.php;
+#         fastcgi_param SCRIPT_NAME     /dply/index.php;
+#         fastcgi_pass unix:/run/php/php8.3-fpm.sock;
+#         fastcgi_read_timeout 3600s;
+#         fastcgi_buffering off;
+#     }
+#
+#     # Only index.php is reachable under /dply/. (return, unlike deny, is
+#     # not inherited by the nested locations above.)
+#     return 404;
+# }

@@ -24,7 +24,7 @@ function web_main(): void
         http_response_code(503);
         render_bare('Setup required', '<div class="card"><div class="key-ic on" style="margin-bottom:16px">' . icon('settings') . '</div><h1>Setup required</h1><p class="lead mute">Initial setup is done on the server '
             . 'command line so nobody can claim this console over the web. Run (as the PHP user):</p>'
-            . '<pre>sudo -u ' . h(proc_user()) . ' php ' . h(DPLY_DIR) . '/index.php setup</pre></div>');
+            . '<pre>sudo -u ' . h(proc_user()) . ' php ' . h(DPLY_PUBLIC) . '/index.php setup</pre></div>');
         return;
     }
     $ip = client_ip();

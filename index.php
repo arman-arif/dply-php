@@ -425,6 +425,18 @@ function slugify(string $s): string
     return substr(trim((string) preg_replace('/[^a-z0-9]+/', '-', strtolower($s)), '-'), 0, 40);
 }
 
+/** Character length of a UTF-8 string without requiring the mbstring extension. */
+function utf8_len(string $s): int
+{
+    return (int) preg_match_all('/./us', $s);
+}
+
+/** Shorten a UTF-8 string to $max characters, ending with "…" when cut. */
+function utf8_trim(string $s, int $max): string
+{
+    return utf8_len($s) <= $max ? $s : (string) preg_replace('/^(.{' . ($max - 1) . '}).*$/us', '$1', $s) . '…';
+}
+
 function valid_slug(string $s): bool
 {
     return (bool) preg_match('/^[a-z0-9][a-z0-9-]{0,39}$/', $s);
@@ -1945,7 +1957,7 @@ function stat_tile(string $icon, string $label, string $value, string $sub = '',
 
 function avatar(string $name): string
 {
-    return '<span class="avatar" aria-hidden="true">' . h(mb_strtoupper(mb_substr($name, 0, 1))) . '</span>';
+    return '<span class="avatar" aria-hidden="true">' . h(strtoupper(substr($name, 0, 1))) . '</span>';
 }
 
 function empty_state(string $icon, string $text): string
@@ -4054,7 +4066,7 @@ function do_projects(): void
             $copy = (int) ($_POST['copy_from'] ?? 0);
             $copy = $copy && project_by_id($copy) ? $copy : 0;
             $auth = $copy ? project_setting($copy, 'git_auth') : 'none';
-            $err = $name === '' || mb_strlen($name) > 60 ? 'Name is required (max 60 characters).'
+            $err = $name === '' || utf8_len($name) > 60 ? 'Name is required (max 60 characters).'
                 : (!valid_slug($slug) ? 'Slug: lowercase letters, digits and dashes (max 40).'
                 : (project_by_ref($slug) ? "Slug '$slug' is already taken." : ($rootErr ?? repo_url_error($url, $auth) ?? branch_error($branch))));
             if ($err) {
@@ -4080,7 +4092,7 @@ function do_projects(): void
             redirect('?a=settings');
             // no break — redirect() never returns
         case 'rename':
-            if ($name === '' || mb_strlen($name) > 60) {
+            if ($name === '' || utf8_len($name) > 60) {
                 flash('err', 'Name is required (max 60 characters).');
             } elseif (!valid_slug($slug)) {
                 flash('err', 'Slug: lowercase letters, digits and dashes (max 40).');
@@ -4169,7 +4181,7 @@ function cli_main(array $argv): int
         case 'projects':
             foreach (projects_all() as $p) {
                 $last = project_last_deploy($p['id']);
-                printf("%-20s %-28s %-12s %s\n", $p['slug'], mb_strimwidth($p['name'], 0, 28, '…'), project_setting($p['id'], 'branch'),
+                printf("%-20s %-28s %-12s %s\n", $p['slug'], utf8_trim($p['name'], 28), project_setting($p['id'], 'branch'),
                     project_setting($p['id'], 'project_root') . ($last ? "  (last deploy: {$last['status']} " . date('Y-m-d H:i', (int) $last['started_at']) . ')' : ''));
             }
             break;

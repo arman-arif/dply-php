@@ -94,6 +94,18 @@ function slugify(string $s): string
     return substr(trim((string) preg_replace('/[^a-z0-9]+/', '-', strtolower($s)), '-'), 0, 40);
 }
 
+/** Character length of a UTF-8 string without requiring the mbstring extension. */
+function utf8_len(string $s): int
+{
+    return (int) preg_match_all('/./us', $s);
+}
+
+/** Shorten a UTF-8 string to $max characters, ending with "…" when cut. */
+function utf8_trim(string $s, int $max): string
+{
+    return utf8_len($s) <= $max ? $s : (string) preg_replace('/^(.{' . ($max - 1) . '}).*$/us', '$1', $s) . '…';
+}
+
 function valid_slug(string $s): bool
 {
     return (bool) preg_match('/^[a-z0-9][a-z0-9-]{0,39}$/', $s);

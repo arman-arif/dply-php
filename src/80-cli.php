@@ -36,7 +36,7 @@ function cli_main(array $argv): int
         case 'projects':
             foreach (projects_all() as $p) {
                 $last = project_last_deploy($p['id']);
-                printf("%-20s %-28s %-12s %s\n", $p['slug'], mb_strimwidth($p['name'], 0, 28, '…'), project_setting($p['id'], 'branch'),
+                printf("%-20s %-28s %-12s %s\n", $p['slug'], utf8_trim($p['name'], 28), project_setting($p['id'], 'branch'),
                     project_setting($p['id'], 'project_root') . ($last ? "  (last deploy: {$last['status']} " . date('Y-m-d H:i', (int) $last['started_at']) . ')' : ''));
             }
             break;

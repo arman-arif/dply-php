@@ -26,7 +26,7 @@ function page_dashboard(): void
     if (is_file("$root/.env") && (fileperms("$root/.env") & 0004)) {
         $warn[] = '.env is world-readable. Consider: chmod 640 .env';
     }
-    if (path_within(DPLY_DATA, DPLY_DIR) && stripos((string) ($_SERVER['SERVER_SOFTWARE'] ?? ''), 'apache') === false) {
+    if (path_within(DPLY_DATA, DPLY_PUBLIC) && stripos((string) ($_SERVER['SERVER_SOFTWARE'] ?? ''), 'apache') === false) {
         $warn[] = 'Not running on Apache: make sure your web server denies requests to ' . DPLY_DATA . ' (see header of index.php).';
     }
     $warnHtml = '';

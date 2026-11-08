@@ -26,7 +26,7 @@ function cli_main(array $argv): int
     if (isset($opts['project'])) {
         $p = is_string($opts['project']) ? project_by_ref($opts['project']) : null;
         if (!$p) {
-            fwrite(STDERR, "Unknown project '" . (is_string($opts['project']) ? $opts['project'] : '') . "'. Run: php index.php projects\n");
+            fwrite(STDERR, "Unknown project '" . (is_string($opts['project']) ? $opts['project'] : '') . "'. Run: php public/index.php projects\n");
             return 1;
         }
         use_project($p['id']);
@@ -212,9 +212,9 @@ DPLY {$GLOBALS['argv'][0]} — commands:
   deploy [--steps=a,b,c]   Run a deployment from the command line
 
 Project-specific commands (deploy) act on the first project unless you pass
---project=<slug>, e.g.: php index.php deploy --project=shop-api
+--project=<slug>, e.g.: php public/index.php deploy --project=shop-api
 
-Run as the same user PHP-FPM/Apache uses, e.g.: sudo -u www-data php index.php setup
+Run as the same user PHP-FPM/Apache uses, e.g.: sudo -u www-data php public/index.php setup
 
 TXT;
     }

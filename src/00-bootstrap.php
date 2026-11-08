@@ -9,8 +9,8 @@
  *  (No server provisioning and no database create/drop — by design.)
  *
  *  FIRST RUN — on the server, as the user PHP runs as (e.g. www-data):
- *      sudo -u www-data php app/tool/dply/index.php setup
- *  Other CLI commands:   php app/tool/dply/index.php help
+ *      sudo -u www-data php app/tool/dply/public/index.php setup
+ *  Other CLI commands:   php app/tool/dply/public/index.php help
  *
  *  PROJECTS: one console can deploy several apps. Add them under Projects in
  *  the web UI or with `project:add <slug> --root=/path`; pick one in the
@@ -23,11 +23,13 @@
  *      HTTP Basic auth (own username/password) → user login (+ optional TOTP)
  *      → per-user permissions → password re-confirmation for sensitive pages.
  *
- *  EXPOSING IT: this file lives outside public/. Either point a dedicated
- *  (sub)domain at this directory, or symlink it into public/:
- *      ln -s ../app/tool/dply public/dply
- *  Runtime data (sqlite.db, keys, sessions, .env backups) lives in ./data.
- *  On Apache it is denied by generated .htaccess files. On nginx add e.g.:
+ *  EXPOSING IT: only the tool's public/ directory (this file) is web-facing.
+ *  Either point a dedicated (sub)domain at app/tool/dply/public, or symlink it
+ *  into your app's public/:
+ *      ln -s ../app/tool/dply/public public/dply
+ *  Runtime data (sqlite.db, keys, sessions, .env backups) lives in ../data,
+ *  outside the web root. If you relocate it (DPLY_DATA_DIR) somewhere
+ *  web-reachable: Apache is covered by generated .htaccess files; on nginx add e.g.:
  *      location ~ ^/dply/(?!index\.php) { deny all; }
  *  Serve it over HTTPS only. Optionally relocate data via env DPLY_DATA_DIR.
  * ============================================================================
@@ -35,8 +37,9 @@
 declare(strict_types=1);
 
 define('DPLY_VERSION', '1.1.0');
-define('DPLY_DIR', __DIR__);
-define('DPLY_DATA', rtrim((string) (getenv('DPLY_DATA_DIR') ?: __DIR__ . '/data'), '/'));
+define('DPLY_PUBLIC', __DIR__);          // web root: index.php + .htaccess
+define('DPLY_DIR', dirname(__DIR__));     // tool root: src/, build.php, data/
+define('DPLY_DATA', rtrim((string) (getenv('DPLY_DATA_DIR') ?: DPLY_DIR . '/data'), '/'));
 define('DPLY_DB', DPLY_DATA . '/sqlite.db');
 define('DPLY_MAX_OUTPUT', 1048576);
 

@@ -128,7 +128,7 @@ function deploy_run(string $actor, array $steps, ?string $rollbackTo = null, ?ca
 
         if (setting('git_clean') === '1') {
             $clean = array_merge($git, ['clean', '-fd', '-e', '/.env']);
-            foreach ([DPLY_DATA, DPLY_DIR . '/.htaccess'] as $keep) {
+            foreach ([DPLY_DATA, DPLY_PUBLIC . '/.htaccess'] as $keep) {
                 if (($rel = repo_rel_path($keep)) !== null && $rel !== '') {
                     array_push($clean, '-e', '/' . $rel);
                 }

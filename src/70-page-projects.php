@@ -99,7 +99,7 @@ function do_projects(): void
             $copy = (int) ($_POST['copy_from'] ?? 0);
             $copy = $copy && project_by_id($copy) ? $copy : 0;
             $auth = $copy ? project_setting($copy, 'git_auth') : 'none';
-            $err = $name === '' || mb_strlen($name) > 60 ? 'Name is required (max 60 characters).'
+            $err = $name === '' || utf8_len($name) > 60 ? 'Name is required (max 60 characters).'
                 : (!valid_slug($slug) ? 'Slug: lowercase letters, digits and dashes (max 40).'
                 : (project_by_ref($slug) ? "Slug '$slug' is already taken." : ($rootErr ?? repo_url_error($url, $auth) ?? branch_error($branch))));
             if ($err) {
@@ -125,7 +125,7 @@ function do_projects(): void
             redirect('?a=settings');
             // no break — redirect() never returns
         case 'rename':
-            if ($name === '' || mb_strlen($name) > 60) {
+            if ($name === '' || utf8_len($name) > 60) {
                 flash('err', 'Name is required (max 60 characters).');
             } elseif (!valid_slug($slug)) {
                 flash('err', 'Slug: lowercase letters, digits and dashes (max 40).');

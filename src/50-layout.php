@@ -99,7 +99,7 @@ function stat_tile(string $icon, string $label, string $value, string $sub = '',
 
 function avatar(string $name): string
 {
-    return '<span class="avatar" aria-hidden="true">' . h(mb_strtoupper(mb_substr($name, 0, 1))) . '</span>';
+    return '<span class="avatar" aria-hidden="true">' . h(strtoupper(substr($name, 0, 1))) . '</span>';
 }
 
 function empty_state(string $icon, string $text): string

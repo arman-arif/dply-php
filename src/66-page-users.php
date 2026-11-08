@@ -25,7 +25,7 @@ function perm_checkboxes(array $selected, bool $disableAdmin = false): string
     foreach (DPLY_PERMS as $k => $label) {
         $dis = $disableAdmin && $k === 'admin';
         $o .= '<label class="chk"><input type="checkbox" name="perms[]" value="' . h($k) . '"' . (in_array($k, $selected, true) ? ' checked' : '')
-            . ($dis ? ' disabled' : '') . '><span><code>' . h($k) . '</code> <span class="mute small">' . h($label) . '</span></span></label>';
+            . ($dis ? ' disabled' : '') . '><span><b style="font-weight:600">' . h($k) . '</b><br><span class="mute small">' . h($label) . '</span></span></label>';
         if ($dis && in_array($k, $selected, true)) {
             $o .= '<input type="hidden" name="perms[]" value="admin">';
         }
@@ -36,35 +36,38 @@ function perm_checkboxes(array $selected, bool $disableAdmin = false): string
 function page_users(): void
 {
     $me = current_user();
-    $html = '<h1>Users</h1>';
-    foreach (db()->query('SELECT * FROM users ORDER BY username')->fetchAll() as $u) {
+    $all = db()->query('SELECT * FROM users ORDER BY username')->fetchAll();
+    $html = page_head('Users', 'Who can sign in, and what each person is allowed to do.', '<a class="btn primary" href="#add-user">' . icon('plus') . 'Add user</a>');
+    foreach ($all as $u) {
         $id = (int) $u['id'];
         $self = $id === (int) $me['id'];
         $perms = array_filter(explode(',', (string) $u['perms']));
         $locked = (int) $u['locked_until'] > time();
         $hid = csrf_field() . '<input type="hidden" name="id" value="' . $id . '">';
-        $html .= '<div class="card"><div class="row" style="justify-content:space-between"><h2 style="margin:0">' . h($u['username']) . ' '
-            . ((int) $u['active'] ? badge('active', 'ok') : badge('disabled', 'err')) . ' ' . ($u['totp_secret'] ? badge('2FA', 'ok') : '')
-            . ($locked ? ' ' . badge('locked until ' . date('H:i', (int) $u['locked_until']), 'err') : '') . ($self ? ' ' . badge('you') : '') . '</h2>'
-            . '<span class="small mute">last login ' . h(fmt_time($u['last_login_at'] ? (int) $u['last_login_at'] : null)) . ($u['last_login_ip'] ? ' from ' . h($u['last_login_ip']) : '') . '</span></div>'
-            . '<div class="grid" style="margin-top:12px"><form method="post" action="?a=users">' . $hid . '<input type="hidden" name="op" value="update">'
-            . perm_checkboxes($perms, $self)
-            . '<label class="chk"><input type="checkbox" name="active" value="1"' . ((int) $u['active'] ? ' checked' : '') . ($self ? ' disabled' : '') . '><span>Account enabled</span></label>'
-            . ($self ? '<input type="hidden" name="active" value="1">' : '')
-            . '<button type="submit">Save permissions</button></form>'
-            . '<div class="stack"><form method="post" action="?a=users">' . $hid . '<input type="hidden" name="op" value="password">'
-            . '<label><span>New password (min 12)</span><input type="password" name="password" autocomplete="new-password" required minlength="12"></label>'
-            . '<button type="submit">Set password</button></form><div class="row">'
-            . ($locked || (int) $u['failed_count'] ? '<form method="post" action="?a=users">' . $hid . '<input type="hidden" name="op" value="unlock"><button class="sm" type="submit">Unlock</button></form>' : '')
+        $html .= '<div class="card"><div class="ucard-h">' . avatar((string) $u['username']) . '<div class="n"><b>' . h($u['username']) . ' '
+            . ((int) $u['active'] ? badge('active', 'ok') : badge('disabled', 'err')) . ($u['totp_secret'] ? badge('2FA', 'ok') : '')
+            . ($locked ? badge('locked until ' . date('H:i', (int) $u['locked_until']), 'err') : '') . ($self ? badge('you') : '') . '</b>'
+            . '<small>Last login ' . ($u['last_login_at'] ? ago((int) $u['last_login_at']) : 'never') . ($u['last_login_ip'] ? ' from ' . h($u['last_login_ip']) : '') . '</small></div>'
+            . '<div class="row">'
+            . ($locked || (int) $u['failed_count'] ? '<form method="post" action="?a=users">' . $hid . '<input type="hidden" name="op" value="unlock"><button class="sm" type="submit">' . icon('lock') . 'Unlock</button></form>' : '')
             . ($u['totp_secret'] ? '<form method="post" action="?a=users" data-confirm="Remove 2FA from this user?">' . $hid . '<input type="hidden" name="op" value="reset2fa"><button class="sm" type="submit">Reset 2FA</button></form>' : '')
-            . '<form method="post" action="?a=users">' . $hid . '<input type="hidden" name="op" value="kill"><button class="sm" type="submit">Sign out everywhere</button></form>'
-            . ($self ? '' : '<form method="post" action="?a=users" data-confirm="Delete user ' . h($u['username']) . '?">' . $hid . '<input type="hidden" name="op" value="delete"><button class="sm danger" type="submit">Delete</button></form>')
-            . '</div></div></div></div>';
+            . '<form method="post" action="?a=users" data-confirm="Sign ' . h($u['username']) . ' out of every session?">' . $hid . '<input type="hidden" name="op" value="kill"><button class="sm" type="submit">' . icon('logout') . 'Sign out everywhere</button></form>'
+            . ($self ? '' : '<form method="post" action="?a=users" data-confirm="Delete user ' . h($u['username']) . '? This cannot be undone.">' . $hid . '<input type="hidden" name="op" value="delete"><button class="sm danger" type="submit">Delete</button></form>')
+            . '</div></div>'
+            . '<div class="grid-main" style="margin:0"><form method="post" action="?a=users">' . $hid . '<input type="hidden" name="op" value="update">'
+            . '<div class="sub-h" style="margin-top:0">Permissions</div><div class="chks">' . perm_checkboxes($perms, $self)
+            . '<label class="chk"><input type="checkbox" name="active" value="1"' . ((int) $u['active'] ? ' checked' : '') . ($self ? ' disabled' : '') . '><span><b style="font-weight:600">Account enabled</b><br><span class="mute small">Disabled accounts cannot sign in</span></span></label></div>'
+            . ($self ? '<input type="hidden" name="active" value="1">' : '')
+            . '<button type="submit">' . icon('check') . 'Save permissions</button></form>'
+            . '<form method="post" action="?a=users">' . $hid . '<input type="hidden" name="op" value="password"><div class="sub-h" style="margin-top:0">Reset password</div>'
+            . '<label><span>New password (min 12 characters)</span><input type="password" name="password" autocomplete="new-password" required minlength="12"></label>'
+            . '<button type="submit">' . icon('lock') . 'Set password</button></form></div></div>';
     }
-    $html .= '<form method="post" action="?a=users" class="card">' . csrf_field() . '<h2>Add user</h2><input type="hidden" name="op" value="create">'
-        . '<div class="grid"><div><label><span>Username</span><input type="text" name="username" pattern="[A-Za-z0-9_.@-]{3,64}" required></label>'
-        . '<label><span>Password (min 12)</span><input type="password" name="password" autocomplete="new-password" required minlength="12"></label></div>'
-        . '<div>' . perm_checkboxes(['deploy']) . '</div></div><button class="primary" type="submit">Create user</button></form>';
+    $html .= '<form method="post" action="?a=users" class="card" id="add-user">' . csrf_field() . '<h2>' . icon('plus') . 'Add user</h2><input type="hidden" name="op" value="create">'
+        . '<div class="grid-main" style="margin-bottom:6px"><div><div class="sub-h" style="margin-top:0">Permissions</div><div class="chks">' . perm_checkboxes(['deploy']) . '</div></div>'
+        . '<div><div class="sub-h" style="margin-top:0">Credentials</div><label><span>Username</span><input type="text" name="username" pattern="[A-Za-z0-9_.@-]{3,64}" required placeholder="jane.doe"></label>'
+        . '<label><span>Password (min 12 characters)</span><input type="password" name="password" autocomplete="new-password" required minlength="12"></label>'
+        . '<button class="primary" type="submit">' . icon('plus') . 'Create user</button></div></div></form>';
     render('Users', $html);
 }
 

@@ -440,7 +440,7 @@ function web_main(): void
     send_security_headers();
     if (!setup_done()) {
         http_response_code(503);
-        render_bare('Setup required', '<div class="card"><h1>Setup required</h1><p>Initial setup is done on the server '
+        render_bare('Setup required', '<div class="card"><div class="key-ic on" style="margin-bottom:16px">' . icon('settings') . '</div><h1>Setup required</h1><p class="lead mute">Initial setup is done on the server '
             . 'command line so nobody can claim this console over the web. Run (as the PHP user):</p>'
             . '<pre>sudo -u ' . h(proc_user()) . ' php ' . h(DPLY_DIR) . '/index.php setup</pre></div>');
         return;
@@ -448,7 +448,7 @@ function web_main(): void
     $ip = client_ip();
     if (!ip_allowed($ip)) {
         http_response_code(403);
-        render_bare('Forbidden', '<div class="card"><h1>403 — Forbidden</h1><p>Your address is not allowed.</p></div>');
+        render_bare('Forbidden', '<div class="card"><div class="key-ic" style="margin-bottom:16px;color:var(--err)">' . icon('x') . '</div><h1>Access denied</h1><p class="mute">Your IP address is not on this console\'s allow-list.</p></div>');
         return;
     }
     if ($until = blocked_until($ip)) {
@@ -494,7 +494,7 @@ function blocked_response(int $until): void
 {
     http_response_code(403);
     header('Retry-After: ' . max(1, $until - time()));
-    render_bare('Blocked', '<div class="card"><h1>Access temporarily blocked</h1><p>Too many failed authentication attempts '
+    render_bare('Blocked', '<div class="card"><div class="key-ic" style="margin-bottom:16px;color:var(--err)">' . icon('lock') . '</div><h1>Temporarily blocked</h1><p class="mute">Too many failed authentication attempts '
         . 'from your address. Try again after ' . h(date('Y-m-d H:i:s T', $until)) . '.</p></div>');
 }
 
@@ -530,7 +530,7 @@ function http_auth_gate(string $ip): void
     }
     header('WWW-Authenticate: Basic realm="DPLY", charset="UTF-8"');
     http_response_code(401);
-    render_bare('Authentication required', '<div class="card"><h1>401 — Authentication required</h1></div>');
+    render_bare('Authentication required', '<div class="card"><div class="key-ic" style="margin-bottom:16px">' . icon('lock') . '</div><h1>Authentication required</h1><p class="mute">Reload the page and enter the HTTP credentials.</p></div>');
     exit;
 }
 
@@ -711,7 +711,7 @@ function dispatch(): void
     }
     if (!isset($routes[$a])) {
         http_response_code(404);
-        render('Not found', '<div class="card"><h1>404 — Not found</h1></div>');
+        render('Not found', '<div class="card">' . empty_state('search', 'This page does not exist.') . '<p style="text-align:center"><a class="btn" href="?a=dashboard">' . icon('back') . 'Back to dashboard</a></p></div>');
         return;
     }
     [$perm, $sudo] = $routes[$a];
@@ -721,8 +721,8 @@ function dispatch(): void
             json_out(['error' => 'Permission denied.'], 403);
         }
         http_response_code(403);
-        render('Forbidden', '<div class="card"><h1>403 — Permission denied</h1><p>Your account lacks the <code>'
-            . h($perm) . '</code> permission.</p></div>');
+        render('Forbidden', page_head('Permission denied') . '<div class="flash err">Your account lacks the <code>'
+            . h($perm) . '</code> permission. Ask an administrator if you need access.</div>');
         return;
     }
     if ($sudo && !sudo_fresh()) {
@@ -735,7 +735,7 @@ function dispatch(): void
     $fn = ($post ? 'do_' : 'page_') . $a;
     if (!function_exists($fn)) {
         http_response_code(405);
-        render('Method not allowed', '<div class="card"><h1>405 — Method not allowed</h1></div>');
+        render('Method not allowed', page_head('Method not allowed') . '<div class="card">' . empty_state('alert', 'This action cannot be performed this way.') . '</div>');
         return;
     }
     $fn();
@@ -750,10 +750,10 @@ function dispatch(): void
 function page_login(): void
 {
     render_bare('Sign in', '<form method="post" action="?a=login" class="card login">' . csrf_field()
-        . '<h1>DPLY — sign in</h1>'
-        . '<label><span>Username</span><input type="text" name="username" autocomplete="username" required autofocus maxlength="64"></label>'
-        . '<label><span>Password</span><input type="password" name="password" autocomplete="current-password" required></label>'
-        . '<button class="primary" type="submit">Sign in</button></form>', true);
+        . '<h1>Welcome back</h1><p class="lead">Sign in to manage deployments.</p>'
+        . '<label><span>Username</span><input type="text" name="username" autocomplete="username" required autofocus maxlength="64" placeholder="your.username"></label>'
+        . '<label><span>Password</span><input type="password" name="password" autocomplete="current-password" required placeholder="••••••••••••"></label>'
+        . '<button class="primary" type="submit">Sign in ' . icon('arrow') . '</button></form><p class="auth-foot">' . icon('lock', 'small') . ' Protected console · all actions are audited</p>', true);
 }
 
 function find_user(string $username): ?array
@@ -842,9 +842,9 @@ function page_login_2fa(): void
         redirect('?a=login');
     }
     render_bare('Two-factor', '<form method="post" action="?a=login_2fa" class="card login">' . csrf_field()
-        . '<h1>Two-factor code</h1><p class="mute">Enter the 6-digit code from your authenticator app.</p>'
-        . '<label><span>Code</span><input type="text" name="code" inputmode="numeric" pattern="[0-9 ]{6,7}" autocomplete="one-time-code" required autofocus></label>'
-        . '<button class="primary" type="submit">Verify</button> <a href="?a=login">Cancel</a></form>', true);
+        . '<h1>Two-factor verification</h1><p class="lead">Enter the 6-digit code from your authenticator app.</p>'
+        . '<label><span>Authentication code</span><input type="text" name="code" class="otp" inputmode="numeric" pattern="[0-9 ]{6,7}" maxlength="7" placeholder="000000" autocomplete="one-time-code" required autofocus></label>'
+        . '<button class="primary" type="submit">Verify ' . icon('arrow') . '</button><p class="auth-foot" style="margin-bottom:0"><a href="?a=login">' . icon('back', 'small') . ' Back to sign in</a></p></form>', true);
 }
 
 function do_login_2fa(): void
@@ -880,11 +880,12 @@ function page_reauth(): void
 {
     $ret = safe_return((string) ($_GET['return'] ?? '?a=dashboard'));
     render('Confirm password', '<form method="post" action="?a=reauth" class="card login">' . csrf_field()
-        . '<h1>Confirm your password</h1><p class="mute">This area is sensitive. Re-enter your password to continue '
-        . '(valid for ' . (int) ceil((int) setting('sudo_ttl') / 60) . ' minutes).</p>'
+        . '<div class="key-ic on" style="margin-bottom:16px">' . icon('lock') . '</div>'
+        . '<h1>Confirm your password</h1><p class="lead">This area is sensitive. Re-enter your password to continue — '
+        . 'you won\'t be asked again for ' . (int) ceil((int) setting('sudo_ttl') / 60) . ' minutes.</p>'
         . '<input type="hidden" name="return" value="' . h($ret) . '">'
         . '<label><span>Password</span><input type="password" name="password" autocomplete="current-password" required autofocus></label>'
-        . '<button class="primary" type="submit">Confirm</button></form>');
+        . '<button class="primary" type="submit">Continue ' . icon('arrow') . '</button></form>');
 }
 
 function do_reauth(): void
@@ -1532,85 +1533,498 @@ function fmt_time(?int $t): string
     return $t ? date('Y-m-d H:i:s', $t) : '—';
 }
 
+/** Relative time ("5m ago") wrapped in a span whose tooltip holds the absolute time. */
+function ago(?int $t): string
+{
+    if (!$t) {
+        return '—';
+    }
+    $d = time() - $t;
+    $txt = 'just now';
+    if ($d >= 60) {
+        foreach ([2592000 => 'mo', 86400 => 'd', 3600 => 'h', 60 => 'm'] as $sec => $unit) {
+            if ($d >= $sec) {
+                $txt = intdiv($d, $sec) . $unit . ' ago';
+                break;
+            }
+        }
+    }
+    return '<span title="' . h(fmt_time($t)) . '">' . h($txt) . '</span>';
+}
+
 function badge(string $text, string $kind = ''): string
 {
     return '<span class="badge ' . ($kind ? 'b-' . $kind : '') . '">' . h($text) . '</span>';
 }
 
+/** Inline SVG icon (stroke-based, 24×24 grid). */
+function icon(string $name, string $cls = ''): string
+{
+    static $p = [
+        'dashboard' => '<rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/>',
+        'deploy'    => '<path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"/><path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"/><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0"/><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"/>',
+        'artisan'   => '<path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/>',
+        'terminal'  => '<rect x="2" y="4" width="20" height="16" rx="2"/><path d="m6 9 3 3-3 3M12 15h5"/>',
+        'env'       => '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M8 13h8M8 17h5"/>',
+        'keys'      => '<circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6M15.5 7.5l3 3L22 7l-3-3"/>',
+        'users'     => '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>',
+        'security'  => '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/>',
+        'settings'  => '<path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/>',
+        'audit'     => '<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>',
+        'profile'   => '<path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>',
+        'logout'    => '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/>',
+        'menu'      => '<path d="M3 6h18M3 12h18M3 18h18"/>',
+        'theme'     => '<circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor"/>',
+        'check'     => '<path d="M20 6 9 17l-5-5"/>',
+        'alert'     => '<path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0zM12 9v4M12 17h.01"/>',
+        'x'         => '<path d="M18 6 6 18M6 6l12 12"/>',
+        'copy'      => '<rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
+        'branch'    => '<path d="M6 3v12"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/>',
+        'power'     => '<path d="M18.36 6.64a9 9 0 1 1-12.73 0M12 2v10"/>',
+        'clock'     => '<circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>',
+        'disk'      => '<path d="M22 12H2M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11zM6 16h.01M10 16h.01"/>',
+        'refresh'   => '<path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/>',
+        'back'      => '<path d="M19 12H5M12 19l-7-7 7-7"/>',
+        'arrow'     => '<path d="M5 12h14M12 5l7 7-7 7"/>',
+        'search'    => '<circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>',
+        'files'     => '<path d="M12 20h9M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/>',
+        'lock'      => '<rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>',
+        'plus'      => '<path d="M12 5v14M5 12h14"/>',
+        'download'  => '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/>',
+        'sync'      => '<path d="M21 2v6h-6M3 22v-6h6"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8M21 12a9 9 0 0 1-15 6.7L3 16"/>',
+        'list'      => '<path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>',
+    ];
+    return '<svg class="ic' . ($cls ? ' ' . $cls : '') . '" viewBox="0 0 24 24" aria-hidden="true">' . ($p[$name] ?? '') . '</svg>';
+}
+
+/** Page header: title, optional subtitle, optional right-aligned actions. $title/$actions are HTML; $sub is escaped. */
+function page_head(string $title, string $sub = '', string $actions = ''): string
+{
+    return '<div class="phead"><div class="phead-t"><h1>' . $title . '</h1>' . ($sub !== '' ? '<p>' . h($sub) . '</p>' : '') . '</div>'
+        . ($actions !== '' ? '<div class="row">' . $actions . '</div>' : '') . '</div>';
+}
+
+/** Dashboard stat tile. $value/$sub are HTML. */
+function stat_tile(string $icon, string $label, string $value, string $sub = '', string $tone = ''): string
+{
+    return '<div class="stat"><div class="stat-ic ' . h($tone) . '">' . icon($icon) . '</div><div class="stat-t"><small>' . h($label) . '</small>'
+        . '<b>' . $value . '</b>' . ($sub !== '' ? '<span>' . $sub . '</span>' : '') . '</div></div>';
+}
+
+function avatar(string $name): string
+{
+    return '<span class="avatar" aria-hidden="true">' . h(mb_strtoupper(mb_substr($name, 0, 1))) . '</span>';
+}
+
+function empty_state(string $icon, string $text): string
+{
+    return '<div class="empty">' . icon($icon) . '<p>' . h($text) . '</p></div>';
+}
+
+function layout_css(): string
+{
+    $dark = '--bg:#0a0d12;--side:#0d1117;--panel:#11161e;--panel2:#171d27;--line:#1f2732;--line2:#2a3441;--text:#e6ebf2;--mute:#8d98aa;--faint:#5e697a;'
+        . '--acc:#34d399;--acc2:#22d3ee;--acc-ink:#03140d;--acc-soft:rgba(52,211,153,.12);--ring:rgba(52,211,153,.35);'
+        . '--warn:#fbbf24;--warn-soft:rgba(251,191,36,.12);--err:#f87171;--err-soft:rgba(248,113,113,.12);--info:#60a5fa;--info-soft:rgba(96,165,250,.12);'
+        . '--link:#7cc4ff;--input:#0b0f15;--code:#0b0f15;--shadow:0 1px 2px rgba(0,0,0,.4),0 10px 30px -12px rgba(0,0,0,.5);color-scheme:dark;';
+    $light = '--bg:#f4f6f9;--side:#ffffff;--panel:#ffffff;--panel2:#f2f5f8;--line:#e4e9ef;--line2:#d2d9e2;--text:#0f172a;--mute:#5a6576;--faint:#8b95a5;'
+        . '--acc:#059669;--acc2:#0891b2;--acc-ink:#ffffff;--acc-soft:rgba(5,150,105,.09);--ring:rgba(5,150,105,.28);'
+        . '--warn:#b45309;--warn-soft:rgba(217,119,6,.1);--err:#dc2626;--err-soft:rgba(220,38,38,.08);--info:#2563eb;--info-soft:rgba(37,99,235,.08);'
+        . '--link:#1d6fd8;--input:#ffffff;--code:#f5f7fa;--shadow:0 1px 2px rgba(15,23,42,.05),0 8px 24px -14px rgba(15,23,42,.18);color-scheme:light;';
+    $svg = fn(string $body, string $stroke = 'black') => 'url("data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0 0 24 24\' fill=\'none\' stroke=\''
+        . $stroke . '\' stroke-width=\'2\' stroke-linecap=\'round\' stroke-linejoin=\'round\'%3E' . $body . '%3C/svg%3E")';
+    $iOk = $svg("%3Ccircle cx='12' cy='12' r='10'/%3E%3Cpath d='m8 12 3 3 5-6'/%3E");
+    $iErr = $svg("%3Ccircle cx='12' cy='12' r='10'/%3E%3Cpath d='M15 9l-6 6M9 9l6 6'/%3E");
+    $iWarn = $svg("%3Cpath d='M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0zM12 9v4M12 17h.01'/%3E");
+    $chev = $svg("%3Cpath d='m6 9 6 6 6-6'/%3E", '%238d98aa');
+
+    return <<<CSS
+:root{{$light}--sans:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",sans-serif;--mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+--term:#080b10;--term-line:#1c232d;--term-text:#d5dce6;--r:14px}
+@media (prefers-color-scheme:dark){:root:not([data-theme=light]){{$dark}}}
+:root[data-theme=dark]{{$dark}}
+*{box-sizing:border-box}html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--text);font:14px/1.55 var(--sans);-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}
+a{color:var(--link);text-decoration:none}a:hover{text-decoration:underline}
+::selection{background:var(--ring)}
+.ic{width:18px;height:18px;flex:none;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+
+/* ---- shell ---- */
+.app{display:flex;min-height:100vh}
+.side{position:sticky;top:0;height:100vh;width:252px;flex:none;background:var(--side);border-right:1px solid var(--line);display:flex;flex-direction:column;padding:18px 12px 14px;overflow-y:auto;z-index:30}
+.brand{display:flex;align-items:center;gap:11px;padding:2px 8px 14px;color:var(--text)}
+.brand:hover{text-decoration:none}
+.logo{width:36px;height:36px;border-radius:11px;flex:none;display:grid;place-items:center;color:#fff;background:linear-gradient(135deg,var(--acc),var(--acc2));box-shadow:0 6px 18px -6px var(--acc)}
+.logo .ic{width:19px;height:19px;stroke-width:2}
+.brand b{display:block;font-size:15px;letter-spacing:.08em;line-height:1.2}.brand small{display:block;color:var(--faint);font-size:11.5px}
+.nav-g{margin-top:16px}.nav-l{font-size:10.5px;font-weight:650;text-transform:uppercase;letter-spacing:.1em;color:var(--faint);padding:0 10px 6px}
+.side nav a{position:relative;display:flex;align-items:center;gap:11px;padding:8px 10px;margin:1px 0;border-radius:9px;color:var(--mute);font-weight:500;transition:background .15s,color .15s}
+.side nav a:hover{background:var(--panel2);color:var(--text);text-decoration:none}
+.side nav a.on{background:var(--acc-soft);color:var(--text);font-weight:600}.side nav a.on .ic{color:var(--acc)}
+.side nav a.on::before{content:"";position:absolute;left:-12px;top:9px;bottom:9px;width:3px;border-radius:0 3px 3px 0;background:var(--acc)}
+.side-foot{margin-top:auto;padding-top:14px;border-top:1px solid var(--line)}
+.me{display:flex;align-items:center;gap:10px;padding:8px;border-radius:10px;color:var(--text);min-width:0}
+.me:hover{background:var(--panel2);text-decoration:none}.me>div{min-width:0}
+.me b{display:block;font-size:13.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.me small{display:block;color:var(--faint);font-size:11.5px}
+.side-act{display:flex;gap:6px;margin-top:8px}.side-act>*{flex:1}.side-act form{display:flex}.side-act button{width:100%}
+.avatar{width:34px;height:34px;border-radius:50%;flex:none;display:grid;place-items:center;font-weight:700;font-size:13.5px;color:var(--acc);background:var(--acc-soft);border:1px solid var(--ring)}
+.content{flex:1;min-width:0;display:flex;flex-direction:column}
+.topbar{display:none}
+main{width:100%;max-width:1240px;margin:0 auto;padding:30px 34px 56px}
+.scrim{display:none}
+
+/* ---- typography ---- */
+.phead{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:14px 20px;margin-bottom:24px}
+.phead-t{min-width:0}
+h1{font-size:25px;line-height:1.25;font-weight:700;letter-spacing:-.02em;margin:0;display:flex;flex-wrap:wrap;align-items:center;gap:10px}
+.phead p{margin:6px 0 0;color:var(--mute);max-width:72ch}
+h2{font-size:15px;font-weight:650;margin:0 0 16px;color:var(--text);display:flex;flex-wrap:wrap;align-items:center;gap:8px;letter-spacing:-.005em}
+h2 .ic{color:var(--faint)}
+.sub-h{font-size:12px;font-weight:650;color:var(--faint);text-transform:uppercase;letter-spacing:.08em;margin:22px 0 10px}
+.mute{color:var(--mute)}.small{font-size:12.5px}.break{word-break:break-all}
+p{margin:0 0 12px}
+
+/* ---- cards & grids ---- */
+.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:22px;margin-bottom:18px;min-width:0;box-shadow:var(--shadow)}
+.card>:last-child{margin-bottom:0}
+.card-h{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px;margin-bottom:16px}.card-h h2{margin:0}
+.grid{display:grid;gap:18px;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));margin-bottom:18px}
+.grid>.card,.grid>form.card,.grid>.stack>.card:last-child{margin-bottom:0}.grid .grid{margin-bottom:0}
+.grid-main{display:grid;gap:18px;grid-template-columns:minmax(0,1.55fr) minmax(0,1fr);align-items:start;margin-bottom:18px}
+.grid-main>*{margin-bottom:0}.grid-main .card{margin-bottom:18px}.grid-main>.stack>.card:last-child,.grid-main>.card{margin-bottom:0}
+.stack>*+*{margin-top:18px}.stack>.card{margin-bottom:0}
+.stats{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));margin-bottom:18px}
+.stat{display:flex;gap:14px;align-items:center;background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:16px 18px;box-shadow:var(--shadow);min-width:0}
+.stat-ic{width:42px;height:42px;border-radius:12px;flex:none;display:grid;place-items:center;background:var(--panel2);color:var(--mute)}
+.stat-ic .ic{width:20px;height:20px}
+.stat-ic.ok{background:var(--acc-soft);color:var(--acc)}.stat-ic.warn{background:var(--warn-soft);color:var(--warn)}.stat-ic.err{background:var(--err-soft);color:var(--err)}.stat-ic.info{background:var(--info-soft);color:var(--info)}
+.stat-t{min-width:0}.stat small{display:block;color:var(--mute);font-size:12px;font-weight:500}
+.stat-t>b{display:block;font-size:17px;font-weight:650;letter-spacing:-.01em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.stat-t>span{display:block;color:var(--faint);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.empty{display:flex;flex-direction:column;align-items:center;gap:8px;text-align:center;padding:26px 10px;color:var(--faint)}
+.empty .ic{width:30px;height:30px;stroke-width:1.5}.empty p{margin:0}
+
+/* ---- tables ---- */
+.tbl{overflow-x:auto}
+table{width:100%;border-collapse:collapse}
+th,td{text-align:left;padding:11px 12px;border-bottom:1px solid var(--line);vertical-align:middle}
+th{color:var(--faint);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.07em;white-space:nowrap;padding-top:8px;padding-bottom:8px}
+tr:last-child>td{border-bottom:0}tr:hover>td{background:color-mix(in srgb,var(--panel2) 70%,transparent)}
+td.k{color:var(--mute);width:170px;white-space:nowrap;font-weight:500}
+.card>.tbl{margin:0 -22px -10px}.card.tbl{padding:4px 0}
+.card>.tbl tr>:first-child,.card.tbl tr>:first-child{padding-left:22px}.card>.tbl tr>:last-child,.card.tbl tr>:last-child{padding-right:22px}
+td.row{flex-wrap:nowrap}td .row{flex-wrap:nowrap}
+
+/* ---- forms ---- */
+label{display:block;margin:0 0 16px}
+label>span{display:block;color:var(--mute);font-size:12.5px;font-weight:500;margin-bottom:6px;line-height:1.45}
+input[type=text],input[type=password],input[type=number],select,textarea{width:100%;background:var(--input);color:var(--text);border:1px solid var(--line2);border-radius:10px;padding:9px 12px;font:inherit;transition:border-color .15s,box-shadow .15s}
+input[type=text],input[type=password],input[type=number],select{height:40px}
+input::placeholder,textarea::placeholder{color:var(--faint)}
+input:hover,select:hover,textarea:hover{border-color:var(--faint)}
+input:focus,select:focus,textarea:focus{outline:none;border-color:var(--acc);box-shadow:0 0 0 3px var(--ring)}
+input[readonly],textarea[readonly]{background:var(--code);color:var(--mute)}
+select{appearance:none;-webkit-appearance:none;padding-right:36px;background-image:{$chev};background-repeat:no-repeat;background-position:right 11px center;background-size:16px;cursor:pointer}
+textarea{font:12.5px/1.6 var(--mono);resize:vertical;min-height:80px}
+input[type=checkbox]{width:16px;height:16px;margin:2px 0 0;flex:none;accent-color:var(--acc);cursor:pointer}
+.chk{display:flex;gap:11px;align-items:flex-start;margin:0 0 6px;padding:9px 12px;border:1px solid var(--line);border-radius:10px;cursor:pointer;transition:background .15s,border-color .15s;line-height:1.45}
+.chk:hover{background:var(--panel2)}.chk:has(input:checked){border-color:color-mix(in srgb,var(--acc) 45%,transparent);background:var(--acc-soft)}
+.chk:has(input:disabled){opacity:.65;cursor:not-allowed}
+.chk>span{color:var(--text);font-size:13.5px;margin:0;font-weight:400}
+.chks{display:grid;gap:6px;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));margin-bottom:16px}.chks .chk{margin:0}
+.field-row{display:grid;gap:0 14px;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));align-items:end}
+.hint{color:var(--faint);font-size:12.5px;margin:8px 0 0}
+
+/* ---- buttons ---- */
+button,.btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;height:38px;padding:0 15px;border-radius:10px;border:1px solid var(--line2);background:var(--panel);color:var(--text);
+ font:550 13.5px/1 var(--sans);cursor:pointer;text-decoration:none;white-space:nowrap;transition:background .15s,border-color .15s,box-shadow .15s,filter .15s,transform .06s;user-select:none}
+button:hover,.btn:hover{background:var(--panel2);border-color:var(--faint);text-decoration:none}
+button:active,.btn:active{transform:translateY(1px)}
+button:focus-visible,.btn:focus-visible,a:focus-visible{outline:none;box-shadow:0 0 0 3px var(--ring)}
+button .ic,.btn .ic{width:16px;height:16px}
+.primary{background:linear-gradient(180deg,color-mix(in srgb,var(--acc) 92%,#fff),var(--acc));border-color:var(--acc);color:var(--acc-ink);font-weight:650;box-shadow:0 6px 16px -8px var(--acc)}
+.primary:hover{background:var(--acc);border-color:var(--acc);filter:brightness(1.07)}
+.danger{background:transparent;color:var(--err);border-color:color-mix(in srgb,var(--err) 40%,transparent)}
+.danger:hover{background:var(--err-soft);border-color:var(--err)}
+.danger.solid{background:var(--err);color:#fff;border-color:var(--err)}.danger.solid:hover{filter:brightness(1.08);background:var(--err)}
+.ghost{background:transparent;border-color:transparent;color:var(--mute)}.ghost:hover{color:var(--text);background:var(--panel2);border-color:transparent}
+button.sm,.btn.sm{height:30px;padding:0 11px;font-size:12.5px;border-radius:8px}
+.btn-lg{height:46px;padding:0 24px;font-size:15px;border-radius:12px}
+.icon-btn{width:38px;padding:0}.icon-btn.sm{width:30px}
+button:disabled{opacity:.55;cursor:not-allowed}
+button.busy{pointer-events:none;opacity:.8}
+button.busy::before{content:"";width:14px;height:14px;flex:none;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:spin .7s linear infinite}
+button.busy .ic{display:none}
+@keyframes spin{to{transform:rotate(360deg)}}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}.row form{margin:0}.row label{margin:0}
+.row.end{justify-content:flex-end}.spread{justify-content:space-between}
+.actions{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-top:20px;padding-top:18px;border-top:1px solid var(--line)}
+
+/* ---- feedback ---- */
+.flash{position:relative;padding:13px 44px 13px 46px;border-radius:12px;margin-bottom:16px;border:1px solid;color:var(--text);line-height:1.5;animation:drop .25s ease-out}
+.flash::before{content:"";position:absolute;left:15px;top:14px;width:19px;height:19px;-webkit-mask:var(--fi) center/contain no-repeat;mask:var(--fi) center/contain no-repeat;background:var(--fc)}
+.flash.ok{--fc:var(--acc);--fi:{$iOk};border-color:color-mix(in srgb,var(--acc) 35%,transparent);background:var(--acc-soft)}
+.flash.err{--fc:var(--err);--fi:{$iErr};border-color:color-mix(in srgb,var(--err) 35%,transparent);background:var(--err-soft)}
+.flash.warn{--fc:var(--warn);--fi:{$iWarn};border-color:color-mix(in srgb,var(--warn) 35%,transparent);background:var(--warn-soft)}
+.flash:not([data-x]){padding-right:16px}
+.flash pre{margin:10px 0 0}.flash a{font-weight:600}
+.flash-x{position:absolute;right:8px;top:8px;width:28px;height:28px;padding:0;border:0;background:transparent;color:var(--mute);border-radius:8px}
+.flash-x:hover{background:color-mix(in srgb,var(--fc) 15%,transparent);color:var(--text)}
+@keyframes drop{from{opacity:0;transform:translateY(-4px)}}
+.badge{display:inline-flex;align-items:center;gap:6px;height:22px;padding:0 9px;border-radius:99px;font-size:11.5px;font-weight:600;line-height:1;letter-spacing:.01em;
+ background:var(--panel2);color:var(--mute);border:1px solid var(--line);white-space:nowrap;vertical-align:middle}
+.b-ok,.b-err,.b-warn,.b-run{border-color:transparent}
+.b-ok{color:var(--acc);background:var(--acc-soft)}.b-err{color:var(--err);background:var(--err-soft)}.b-warn{color:var(--warn);background:var(--warn-soft)}.b-run{color:var(--info);background:var(--info-soft)}
+.b-ok::before,.b-err::before,.b-warn::before,.b-run::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor}
+.b-run::before{animation:pulse 1.2s ease-in-out infinite}
+@keyframes pulse{50%{opacity:.25}}
+.dot{width:8px;height:8px;border-radius:50%;flex:none;background:var(--faint)}.dot.ok{background:var(--acc)}.dot.err{background:var(--err)}.dot.warn{background:var(--warn)}
+.live{display:inline-flex;align-items:center;gap:8px;height:28px;padding:0 12px;border-radius:99px;font-size:12.5px;font-weight:600;color:var(--info);background:var(--info-soft)}
+.live i{width:12px;height:12px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:spin .8s linear infinite}
+.live.done{color:var(--mute);background:var(--panel2)}.live.done i{animation:none;border:0;width:7px;height:7px;background:currentColor}
+
+/* ---- code & logs ---- */
+pre,.log{position:relative;background:var(--code);border:1px solid var(--line);border-radius:12px;padding:14px 16px;overflow:auto;white-space:pre-wrap;word-break:break-word;font:12.5px/1.65 var(--mono);max-height:70vh;margin:0}
+.log{background:var(--term);color:var(--term-text);border-color:var(--term-line);min-height:180px;padding:18px 20px}
+code{font-family:var(--mono);background:var(--panel2);border:1px solid var(--line);padding:1px 6px;border-radius:6px;font-size:12px;word-break:break-word}
+pre code{background:none;border:0;padding:0}
+.copywrap{position:relative}
+.copy-btn{position:absolute;top:8px;right:8px;height:28px;padding:0 9px;font-size:12px;border-radius:8px;opacity:0;transition:opacity .15s;background:var(--panel);z-index:1}
+.copywrap:hover .copy-btn,.copy-btn:focus-visible{opacity:1}.copy-btn.done{color:var(--acc)}
+@media (hover:none){.copy-btn{opacity:1}}
+
+/* ---- dashboard bits ---- */
+.qa{display:grid;gap:8px}
+.qa a,.qa button{justify-content:flex-start;width:100%;height:44px;gap:12px}
+.qa .ic{width:17px;height:17px;color:var(--mute)}.qa .primary .ic{color:inherit}
+.qa .go{margin-left:auto;opacity:.5}
+.deps{list-style:none;margin:0;padding:0}
+.deps li{display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--line)}.deps li:last-child{border-bottom:0}
+.deps .who{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.deps .when{color:var(--faint);font-size:12.5px;white-space:nowrap}
+.pipeline{display:flex;gap:0;list-style:none;margin:0 0 20px;padding:0;counter-reset:s}
+.pipeline li{flex:1;position:relative;padding:0 6px;text-align:center;font-size:12.5px;color:var(--mute);counter-increment:s}
+.pipeline li::before{content:counter(s);display:grid;place-items:center;width:28px;height:28px;margin:0 auto 6px;border-radius:50%;background:var(--acc-soft);color:var(--acc);font-weight:700;font-size:12.5px;position:relative;z-index:1}
+.pipeline li+li::after{content:"";position:absolute;top:14px;right:calc(50% + 18px);width:calc(100% - 36px);height:2px;background:var(--line2)}
+.pipeline b{display:block;color:var(--text);font-weight:600;font-size:13px}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:10px 18px;margin:0}
+.kv dt{color:var(--mute);font-weight:500}.kv dd{margin:0;min-width:0;word-break:break-word}
+
+/* ---- artisan ---- */
+.agrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:8px}
+.agrid form{margin:0}
+.agrid button{width:100%;height:auto;min-height:42px;padding:10px 12px;justify-content:flex-start;text-align:left;white-space:normal;font:500 12.5px/1.35 var(--mono)}
+.agrid button .ic{width:15px;height:15px;color:var(--faint)}
+.agrid button.danger .ic{color:var(--err)}
+.searchbox{position:relative;flex:1;min-width:220px}.searchbox .ic{position:absolute;left:12px;top:50%;transform:translateY(-50%);color:var(--faint);width:16px;height:16px;pointer-events:none}
+.searchbox input{padding-left:38px}
+kbd{font:11px var(--mono);padding:2px 6px;border:1px solid var(--line2);border-bottom-width:2px;border-radius:5px;color:var(--mute);background:var(--panel2)}
+.cmdline{display:flex;align-items:center;border:1px solid var(--line2);border-radius:10px;background:var(--input);overflow:hidden;flex:1;min-width:240px;transition:border-color .15s,box-shadow .15s}
+.cmdline:focus-within{border-color:var(--acc);box-shadow:0 0 0 3px var(--ring)}
+.cmdline span{padding:0 4px 0 13px;font:12.5px var(--mono);color:var(--acc);white-space:nowrap}
+.cmdline input{border:0;box-shadow:none!important;background:transparent;font:13px var(--mono);padding-left:6px}
+
+/* ---- terminal ---- */
+.term{background:var(--term);border:1px solid var(--term-line);border-radius:var(--r);font:13px/1.6 var(--mono);color:var(--term-text);overflow:hidden;box-shadow:var(--shadow)}
+.term-bar{display:flex;align-items:center;gap:12px;padding:10px 14px;border-bottom:1px solid var(--term-line);background:rgba(255,255,255,.025);font:12px var(--sans);color:#8d98aa}
+.term-dots{display:flex;gap:7px}.term-dots i{width:11px;height:11px;border-radius:50%;background:#ff5f57}.term-dots i+i{background:#febc2e}.term-dots i+i+i{background:#28c840}
+.term-bar .t{flex:1;text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.term-out{height:60vh;overflow:auto;padding:16px 18px;white-space:pre-wrap;word-break:break-word}
+.term-out:empty::before{content:"Type a command below and press Enter.";color:#5e697a}
+.term-in{display:flex;gap:8px;align-items:center;border-top:1px solid var(--term-line);padding:10px 18px;background:rgba(255,255,255,.02)}
+.term-in input,.term-in input:focus,.term-in input:hover{border:0;background:transparent;padding:4px;height:auto;font:inherit;color:var(--term-text);box-shadow:none;outline:none}
+.t-cmd{color:#34d399}.t-err{color:#f87171}.cwd{color:#7cc4ff;white-space:nowrap;max-width:45%;overflow:hidden;text-overflow:ellipsis}
+details.card summary{cursor:pointer;font-weight:600;list-style:none;display:flex;align-items:center;gap:8px}
+details.card summary::-webkit-details-marker{display:none}
+details.card summary::before{content:"";width:7px;height:7px;border-right:2px solid var(--faint);border-bottom:2px solid var(--faint);transform:rotate(-45deg);transition:transform .15s;margin-right:4px}
+details.card[open] summary::before{transform:rotate(45deg)}details.card[open] summary{margin-bottom:14px}
+.tips{display:flex;flex-wrap:wrap;gap:6px 16px;color:var(--mute);font-size:12.5px;margin:14px 2px 18px}
+.tips span{display:inline-flex;align-items:center;gap:6px}
+
+/* ---- users / keys ---- */
+.ucard-h{display:flex;flex-wrap:wrap;align-items:center;gap:14px;margin-bottom:18px}
+.ucard-h .avatar{width:44px;height:44px;font-size:17px}
+.ucard-h .n{flex:1;min-width:0}.ucard-h .n b{font-size:16px;display:flex;flex-wrap:wrap;align-items:center;gap:8px}.ucard-h .n small{color:var(--faint);font-size:12.5px}
+.key-ic{width:40px;height:40px;border-radius:11px;display:grid;place-items:center;background:var(--panel2);color:var(--mute);flex:none}
+.key-ic.on{background:var(--acc-soft);color:var(--acc)}
+.divider{border:0;border-top:1px solid var(--line);margin:20px 0}
+
+/* ---- modal ---- */
+dialog.modal{border:1px solid var(--line);border-radius:18px;background:var(--panel);color:var(--text);padding:0;width:min(460px,calc(100vw - 32px));box-shadow:0 30px 80px -20px rgba(0,0,0,.55)}
+dialog.modal[open]{animation:pop .18s ease-out}
+dialog::backdrop{background:rgba(4,7,12,.55);backdrop-filter:blur(3px)}
+@keyframes pop{from{opacity:0;transform:translateY(8px) scale(.98)}}
+.modal-b{display:flex;gap:16px;padding:24px 24px 8px}
+.modal-ic{width:42px;height:42px;border-radius:50%;flex:none;display:grid;place-items:center;background:var(--warn-soft);color:var(--warn)}
+.modal-ic.danger{background:var(--err-soft);color:var(--err)}
+.modal h3{margin:2px 0 6px;font-size:16.5px;font-weight:650}.modal p{margin:0;color:var(--mute);line-height:1.55}
+.modal-f{display:flex;justify-content:flex-end;gap:8px;padding:20px 24px 22px}
+
+/* ---- auth pages ---- */
+body.auth{background:radial-gradient(900px 520px at 0% -10%,var(--acc-soft),transparent 65%),radial-gradient(800px 500px at 110% 110%,var(--info-soft),transparent 60%),var(--bg);background-attachment:fixed}
+main.bare{min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:32px 16px}
+main.bare>*{width:100%;max-width:440px}
+.auth-brand{display:flex;align-items:center;justify-content:center;gap:11px;margin-bottom:22px}
+.auth-brand .logo{width:42px;height:42px;border-radius:13px}.auth-brand b{font-size:19px;letter-spacing:.1em}
+main.bare .card{padding:30px;margin:0;border-radius:18px}
+main.bare h1{font-size:21px;margin-bottom:6px}
+.login{max-width:440px;margin:6vh auto}
+.login .lead{color:var(--mute);margin:0 0 22px}
+.login button.primary{width:100%;height:44px;margin-top:4px}
+.auth-foot{text-align:center;color:var(--faint);font-size:12px;margin-top:18px}.auth-foot .ic{width:13px;height:13px;vertical-align:-2px}
+.otp{font:600 22px var(--mono)!important;letter-spacing:.4em;text-align:center;height:52px!important}
+
+/* ---- responsive ---- */
+@media (max-width:1100px){.grid-main{grid-template-columns:minmax(0,1fr)}}
+@media (max-width:900px){
+ .side{position:fixed;left:0;top:0;bottom:0;transform:translateX(-100%);transition:transform .22s ease;box-shadow:none}
+ body.nav-open .side{transform:none;box-shadow:0 0 60px rgba(0,0,0,.4)}
+ body.nav-open .scrim{display:block;position:fixed;inset:0;background:rgba(4,7,12,.5);z-index:20}
+ .topbar{display:flex;align-items:center;gap:10px;position:sticky;top:0;z-index:10;padding:10px 16px;background:color-mix(in srgb,var(--side) 88%,transparent);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+ .topbar .brand{padding:0}.topbar .logo{width:30px;height:30px;border-radius:9px}.topbar .logo .ic{width:16px;height:16px}
+ main{padding:22px 16px 40px}
+}
+@media (max-width:640px){
+ td.k{width:auto;white-space:normal}h1{font-size:21px}.card{padding:18px}.card>.tbl{margin:0 -18px -8px}
+ .card>.tbl tr>:first-child,.card.tbl tr>:first-child{padding-left:18px}.card>.tbl tr>:last-child,.card.tbl tr>:last-child{padding-right:18px}
+ .pipeline li{font-size:11.5px}.phead{align-items:flex-start}
+ .stats{grid-template-columns:1fr 1fr;gap:10px}.stat{flex-direction:column;align-items:flex-start;gap:10px;padding:14px}.stat-ic{width:36px;height:36px}
+}
+@media (prefers-reduced-motion:reduce){*,*::before{animation:none!important;transition:none!important}}
+CSS;
+}
+
+function nav_items(): array
+{
+    return [
+        'Overview'       => ['dashboard' => ['Dashboard', null]],
+        'Operations'     => ['deploy' => ['Deploy', 'deploy'], 'artisan' => ['Artisan', 'artisan'], 'terminal' => ['Terminal', 'terminal']],
+        'Configuration'  => ['env' => ['Environment', 'env'], 'keys' => ['SSH keys', 'keys']],
+        'Administration' => ['users' => ['Users', 'admin'], 'security' => ['Security', 'admin'], 'settings' => ['Settings', 'admin'], 'audit' => ['Audit log', 'admin']],
+    ];
+}
+
 function layout_head(string $title, bool $nav = true): string
 {
     $u = $nav ? current_user() : null;
-    $navHtml = '';
+    $nonce = csp_nonce();
+    $logo = '<span class="logo">' . icon('deploy') . '</span>';
+    $shell = '';
     if ($u) {
-        $items = [
-            'dashboard' => ['Dashboard', null], 'deploy' => ['Deploy', 'deploy'], 'artisan' => ['Artisan', 'artisan'],
-            'terminal'  => ['Terminal', 'terminal'], 'env' => ['.env', 'env'], 'keys' => ['SSH keys', 'keys'],
-            'users'     => ['Users', 'admin'], 'security' => ['Security', 'admin'], 'settings' => ['Settings', 'admin'],
-            'audit'     => ['Audit log', 'admin'], 'profile' => ['Profile', null],
-        ];
         $cur = (string) ($_GET['a'] ?? 'dashboard');
-        $navHtml = '<nav>';
-        foreach ($items as $k => [$label, $perm]) {
-            if ($perm === null || can($perm)) {
-                $navHtml .= '<a href="?a=' . $k . '"' . ($cur === $k || ($cur === 'deploy_log' && $k === 'deploy') ? ' class="on"' : '') . '>' . h($label) . '</a>';
+        if ($cur === 'deploy_log') {
+            $cur = 'deploy';
+        }
+        $navHtml = '';
+        foreach (nav_items() as $group => $items) {
+            $links = '';
+            foreach ($items as $k => [$label, $perm]) {
+                if ($perm === null || can($perm)) {
+                    $on = $cur === $k;
+                    $links .= '<a href="?a=' . $k . '"' . ($on ? ' class="on" aria-current="page"' : '') . '>' . icon($k) . '<span>' . h($label) . '</span></a>';
+                }
+            }
+            if ($links !== '') {
+                $navHtml .= '<div class="nav-g"><div class="nav-l">' . h($group) . '</div>' . $links . '</div>';
             }
         }
-        $navHtml .= '</nav><form method="post" action="?a=logout" class="row">' . csrf_field()
-            . '<span class="mute">' . h($u['username']) . '</span><button class="sm" type="submit">Sign out</button></form>';
+        $role = in_array('admin', $u['perm_list'] ?? [], true) ? 'Administrator' : 'Member';
+        $shell = '<div class="app"><aside class="side" id="side"><a class="brand" href="?a=dashboard">' . $logo
+            . '<span><b>DPLY</b><small>Deploy console</small></span></a><nav aria-label="Main">' . $navHtml . '</nav>'
+            . '<div class="side-foot"><a class="me' . ($cur === 'profile' ? ' on' : '') . '" href="?a=profile" title="Your profile">' . avatar($u['username'])
+            . '<div><b>' . h($u['username']) . '</b><small>' . h($role) . '</small></div></a>'
+            . '<div class="side-act"><button type="button" class="sm ghost" id="themeBtn" title="Toggle light / dark theme">' . icon('theme') . 'Theme</button>'
+            . '<form method="post" action="?a=logout">' . csrf_field() . '<button class="sm ghost" type="submit">' . icon('logout') . 'Sign out</button></form></div></div></aside>'
+            . '<div class="scrim" id="scrim"></div><div class="content"><header class="topbar"><button type="button" class="icon-btn ghost" id="navBtn" aria-label="Open menu">'
+            . icon('menu') . '</button><a class="brand" href="?a=dashboard">' . $logo . '<span><b>DPLY</b></span></a></header><main>';
+    } else {
+        $shell = '<main class="bare"><div class="auth-brand">' . $logo . '<b>DPLY</b></div>';
     }
-    $css = <<<'CSS'
-:root{--bg:#0e1217;--panel:#151b23;--line:#253041;--text:#d7dee8;--mute:#8693a5;--acc:#3fb68b;--warn:#e0a84a;--err:#e5616a;--link:#6cb6ff;--mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
-header{display:flex;flex-wrap:wrap;align-items:center;gap:6px 14px;padding:10px 16px;background:var(--panel);border-bottom:1px solid var(--line)}
-.brand{font-weight:700;color:var(--acc);letter-spacing:.05em}header nav{display:flex;flex-wrap:wrap;gap:2px;flex:1}
-header nav a{color:var(--mute);text-decoration:none;padding:5px 10px;border-radius:6px}header nav a.on,header nav a:hover{color:var(--text);background:#1f2935}
-main{max-width:1200px;margin:0 auto;padding:20px 16px}h1{font-size:20px;margin:0 0 14px}
-h2{font-size:12px;margin:0 0 12px;color:var(--mute);text-transform:uppercase;letter-spacing:.06em}
-.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px;margin-bottom:16px;min-width:0}
-.grid{display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(300px,1fr))}.grid>.card{margin-bottom:0}.stack>*+*{margin-top:16px}
-.tbl{overflow-x:auto}table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);vertical-align:top}
-th{color:var(--mute);font-weight:600;font-size:12px;white-space:nowrap}td.k{color:var(--mute);width:180px;white-space:nowrap}
-input[type=text],input[type=password],input[type=number],select,textarea{width:100%;background:#0a0e13;color:var(--text);border:1px solid var(--line);border-radius:6px;padding:7px 9px;font:inherit}
-input:focus,select:focus,textarea:focus{outline:2px solid #2d6a55;border-color:#2d6a55}
-textarea{font:13px/1.45 var(--mono);resize:vertical}label{display:block;margin:0 0 12px}label>span{display:block;color:var(--mute);font-size:12px;margin-bottom:3px}
-.chk{display:flex;gap:8px;align-items:flex-start;margin:5px 0}.chk input{margin-top:3px}
-button,.btn{background:#212d3c;color:var(--text);border:1px solid #2f3e52;border-radius:6px;padding:7px 14px;font:inherit;cursor:pointer;text-decoration:none;display:inline-block;line-height:1.3}
-button:hover{border-color:#4a5d77}button.primary{background:var(--acc);border-color:var(--acc);color:#04130d;font-weight:600}
-button.danger{background:transparent;border-color:var(--err);color:var(--err)}button.sm{padding:3px 9px;font-size:12px}button:disabled{opacity:.5;cursor:wait}
-.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}.row form{margin:0}
-.flash{padding:10px 14px;border-radius:8px;margin-bottom:14px;border:1px solid}.flash pre{margin:8px 0 0}
-.flash.ok{border-color:var(--acc);background:#0f241c}.flash.err{border-color:var(--err);background:#28141a}.flash.warn{border-color:var(--warn);background:#282012}
-pre,.log{background:#0a0e13;border:1px solid var(--line);border-radius:8px;padding:12px;overflow:auto;white-space:pre-wrap;word-break:break-word;font:12.5px/1.45 var(--mono);max-height:70vh;margin:0}
-code{font-family:var(--mono);background:#0a0e13;padding:1px 5px;border-radius:4px;font-size:12.5px}
-.badge{display:inline-block;padding:0 8px;border-radius:99px;font-size:12px;border:1px solid var(--line);white-space:nowrap}
-.b-ok{color:var(--acc);border-color:var(--acc)}.b-err{color:var(--err);border-color:var(--err)}.b-warn{color:var(--warn);border-color:var(--warn)}
-.mute{color:var(--mute)}a{color:var(--link)}.small{font-size:12px}.login{max-width:380px;margin:10vh auto}
-.agrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px}.agrid button{width:100%;text-align:left}
-.term{background:#06080b;border:1px solid var(--line);border-radius:8px;font:13px/1.45 var(--mono)}
-.term-out{height:60vh;overflow:auto;padding:12px;white-space:pre-wrap;word-break:break-word}
-.term-in{display:flex;gap:8px;align-items:center;border-top:1px solid var(--line);padding:8px 12px}.term-in input{border:0;background:transparent;padding:4px;font:inherit;outline:none}
-.t-cmd{color:var(--acc)}.t-err{color:var(--err)}.cwd{color:var(--link);white-space:nowrap}
-@media (max-width:640px){td.k{width:auto;white-space:normal}main{padding:16px}}
-CSS;
+    shell_open($u !== null);
+    $themeJs = "try{var t=localStorage.getItem('dply-theme');if(t)document.documentElement.setAttribute('data-theme',t);}catch(e){}";
     return '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
-        . '<meta name="robots" content="noindex,nofollow"><title>' . h($title) . ' · DPLY</title><style>' . $css . '</style></head><body>'
-        . ($u ? '<header><span class="brand">DPLY</span>' . $navHtml . '</header>' : '') . '<main>';
+        . '<meta name="robots" content="noindex,nofollow"><meta name="color-scheme" content="light dark">'
+        . '<link rel="icon" href="data:image/svg+xml,' . rawurlencode('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#34d399"/><stop offset="1" stop-color="#22d3ee"/></linearGradient></defs><rect width="32" height="32" rx="8" fill="url(#g)"/><path d="M10 22l4-4m2-8c3-2 6-2 7-2 0 1 0 4-2 7l-5 4-4-4z" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>') . '"><title>' . h($title) . ' · DPLY</title>'
+        . '<script nonce="' . $nonce . '">' . $themeJs . '</script><style>' . layout_css() . '</style></head>'
+        . '<body' . ($u ? '' : ' class="auth"') . '>' . $shell;
 }
 
 function layout_foot(): string
 {
     $js = <<<'JS'
-document.addEventListener('submit',function(e){var f=e.target,s=e.submitter,m=(s&&s.getAttribute('data-confirm'))||f.getAttribute('data-confirm');
-if(m&&!confirm(m)){e.preventDefault();return;}if(s&&f.getAttribute('data-once')!==null){setTimeout(function(){s.disabled=true;},0);}},true);
+(function(){
+var d=document,dlg=d.getElementById('cfm'),pending=null;
+function $(id){return d.getElementById(id);}
+// Confirmation dialog (replaces window.confirm)
+d.addEventListener('submit',function(e){
+ var f=e.target,s=e.submitter,m=(s&&s.getAttribute('data-confirm'))||f.getAttribute('data-confirm');
+ if(m&&f.__ok!==true&&dlg&&dlg.showModal){
+  e.preventDefault();pending={f:f,s:s};
+  var danger=!!(s&&s.classList.contains('danger'));
+  $('cfmMsg').textContent=m;$('cfmIc').className='modal-ic'+(danger?' danger':'');
+  var go=$('cfmGo');go.className=danger?'danger solid':'primary';go.textContent=(s&&s.textContent.trim())||'Confirm';
+  dlg.showModal();go.focus();return;
+ }
+ f.__ok=false;
+ if(s){s.classList.add('busy');if(f.getAttribute('data-once')!==null){setTimeout(function(){s.disabled=true;},0);}}
+},false);
+if(dlg){
+ $('cfmGo').addEventListener('click',function(){dlg.close();if(!pending)return;var p=pending;pending=null;p.f.__ok=true;
+  if(p.f.requestSubmit){p.f.requestSubmit(p.s||undefined);}else{p.f.submit();}});
+ $('cfmNo').addEventListener('click',function(){pending=null;dlg.close();});
+ dlg.addEventListener('click',function(e){if(e.target===dlg){pending=null;dlg.close();}});
+}
+// Remove spinners when the page is restored from bfcache
+window.addEventListener('pageshow',function(){d.querySelectorAll('button.busy').forEach(function(b){b.classList.remove('busy');b.disabled=false;});});
+// Dismissible flashes
+d.addEventListener('click',function(e){var x=e.target.closest('.flash-x');if(x){var f=x.parentNode;f.style.transition='opacity .2s';f.style.opacity='0';setTimeout(function(){f.remove();},200);}});
+// Copy buttons on logs, code blocks and read-only fields
+function copyText(t,btn){function ok(){btn.classList.add('done');btn.lastChild.textContent='Copied';setTimeout(function(){btn.classList.remove('done');btn.lastChild.textContent='Copy';},1600);}
+ if(navigator.clipboard&&window.isSecureContext){navigator.clipboard.writeText(t).then(ok);return;}
+ var ta=d.createElement('textarea');ta.value=t;ta.style.position='fixed';ta.style.opacity='0';d.body.appendChild(ta);ta.select();try{d.execCommand('copy');ok();}catch(e){}ta.remove();}
+d.querySelectorAll('main pre, main textarea[readonly]').forEach(function(el){
+ if(el.closest('.flash'))return;var w=d.createElement('div');w.className='copywrap';el.parentNode.insertBefore(w,el);w.appendChild(el);
+ var b=d.createElement('button');b.type='button';b.className='copy-btn';b.innerHTML=$('icCopy').innerHTML+'<span>Copy</span>';
+ b.addEventListener('click',function(){copyText(el.value!==undefined&&el.tagName==='TEXTAREA'?el.value:el.textContent,b);});w.appendChild(b);});
+// Theme toggle
+var tb=$('themeBtn');if(tb)tb.addEventListener('click',function(){var r=d.documentElement,c=r.getAttribute('data-theme')||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'),n=c==='dark'?'light':'dark';
+ r.setAttribute('data-theme',n);try{localStorage.setItem('dply-theme',n);}catch(e){}});
+// Mobile navigation
+var nb=$('navBtn'),sc=$('scrim');if(nb)nb.addEventListener('click',function(){d.body.classList.add('nav-open');});
+if(sc)sc.addEventListener('click',function(){d.body.classList.remove('nav-open');});
+d.addEventListener('keydown',function(e){if(e.key==='Escape')d.body.classList.remove('nav-open');
+ if(e.key==='/'&&!/INPUT|TEXTAREA|SELECT/.test((d.activeElement||{}).tagName||'')){var s=d.querySelector('[data-search]');if(s){e.preventDefault();s.focus();}}});
+// Live client-side filter: <input data-search="selector of items">
+d.querySelectorAll('[data-search]').forEach(function(inp){var sel=inp.getAttribute('data-search');inp.addEventListener('input',function(){var q=inp.value.toLowerCase().trim();
+ d.querySelectorAll(sel).forEach(function(it){it.hidden=q!==''&&it.textContent.toLowerCase().indexOf(q)<0;});
+ d.querySelectorAll('[data-group]').forEach(function(g){g.hidden=!g.querySelector(sel+':not([hidden])');});});});
+// Streaming pages: mark as finished
+var lv=$('live');if(lv){lv.classList.add('done');lv.lastChild.textContent='Finished';}
+})();
 JS;
-    return '</main><script nonce="' . csp_nonce() . '">' . $js . '</script></body></html>';
+    $close = shell_open() ? '</main></div></div>' : '</main>';
+    $modal = '<dialog class="modal" id="cfm"><div class="modal-b"><div class="modal-ic" id="cfmIc">' . icon('alert') . '</div><div><h3>Are you sure?</h3><p id="cfmMsg"></p></div></div>'
+        . '<div class="modal-f"><button type="button" id="cfmNo">Cancel</button><button type="button" id="cfmGo" class="primary">Confirm</button></div></dialog>'
+        . '<template id="icCopy">' . icon('copy') . '</template>';
+    return $close . $modal . '<script nonce="' . csp_nonce() . '">' . $js . '</script></body></html>';
+}
+
+/** Remembers whether layout_head() rendered the app shell so layout_foot() closes the same wrappers. */
+function shell_open(?bool $set = null): bool
+{
+    static $shell = false;
+    if ($set !== null) {
+        $shell = $set;
+    }
+    return $shell;
 }
 
 function flash_html(): string
 {
     $out = '';
     foreach ($_SESSION['flash'] ?? [] as [$type, $msg, $pre]) {
-        $out .= '<div class="flash ' . h($type) . '">' . h($msg) . ($pre !== null && $pre !== '' ? '<pre>' . h(strip_ansi($pre)) . '</pre>' : '') . '</div>';
+        $out .= '<div class="flash ' . h($type) . '" data-x role="' . ($type === 'err' ? 'alert' : 'status') . '">' . h($msg)
+            . ($pre !== null && $pre !== '' ? '<pre>' . h(strip_ansi($pre)) . '</pre>' : '')
+            . '<button type="button" class="flash-x" aria-label="Dismiss">' . icon('x') . '</button></div>';
     }
     unset($_SESSION['flash']);
     return $out;
@@ -1641,7 +2055,9 @@ function stream_begin(string $title): void
     $js = "new MutationObserver(function(){var l=document.getElementById('log');if(l)l.scrollTop=l.scrollHeight;})"
         . ".observe(document.documentElement,{childList:true,subtree:true,characterData:true});";
     echo layout_head($title), '<script nonce="', csp_nonce(), '">', $js, '</script>',
-        '<!--', str_repeat(' ', 2048), '--><h1>', h($title), '</h1><pre class="log" id="log">';
+        '<!--', str_repeat(' ', 2048), '-->',
+        page_head(h($title), 'Output streams live below — keep this tab open until it finishes.', '<span class="live" id="live"><i></i><span>Running…</span></span>'),
+        '<pre class="log" id="log">';
     flush();
 }
 
@@ -1653,18 +2069,23 @@ function stream_out(?string $s): void
 
 function stream_end(string $html): void
 {
-    echo '</pre>', $html, layout_foot();
+    echo '</pre><div style="margin-top:16px">', $html, '</div>', layout_foot();
     flush();
+}
+
+function back_link(string $href, string $label): string
+{
+    return '<p class="row" style="margin-top:4px"><a class="btn" href="' . h($href) . '">' . icon('back') . h($label) . '</a></p>';
 }
 
 function steps_checkboxes(array $selected, string $name = 'steps[]'): string
 {
-    $o = '';
+    $o = '<div class="chks">';
     foreach (DPLY_STEPS as $k => $label) {
         $o .= '<label class="chk"><input type="checkbox" name="' . h($name) . '" value="' . h($k) . '"'
             . (in_array($k, $selected, true) ? ' checked' : '') . '><span>' . h($label) . '</span></label>';
     }
-    return $o;
+    return $o . '</div>';
 }
 
 function laravel_version(): string
@@ -1711,36 +2132,72 @@ function page_dashboard(): void
     }
 
     $rows = [
-        'Project root'    => '<code>' . h($root) . '</code>' . (is_dir($root) ? '' : ' ' . badge('missing', 'err')),
-        'Laravel'         => h(laravel_version()),
-        'PHP (CLI used)'  => '<code>' . h(php_bin()) . '</code>',
-        'Runs as'         => h(proc_user()),
-        'Git branch'      => $branch ? h($branch) . ($branch !== setting('branch') ? ' ' . badge('deploy branch: ' . setting('branch'), 'warn') : '') : badge('not a git repo', 'warn'),
-        'HEAD'            => $head ? h($head) : '—',
-        'Working tree'    => $isGit ? ($changes ? badge("$changes local change(s)", 'warn') : badge('clean', 'ok')) : '—',
-        'Maintenance'     => $down ? badge('DOWN', 'err') : badge('up', 'ok'),
-        'Git auth'        => h(setting('git_auth')),
-        'Disk free'       => is_dir($root) ? h(round((float) @disk_free_space($root) / 1073741824, 1) . ' GB') : '—',
+        'Project root'   => '<code>' . h($root) . '</code>' . (is_dir($root) ? '' : ' ' . badge('missing', 'err')),
+        'HEAD'           => $head ? h($head) : '<span class="mute">—</span>',
+        'Laravel'        => h(laravel_version()),
+        'PHP (CLI used)' => '<code>' . h(php_bin()) . '</code>',
+        'Runs as'        => h(proc_user()),
+        'Git auth'       => h(setting('git_auth')),
     ];
     $info = '';
     foreach ($rows as $k => $v) {
         $info .= '<tr><td class="k">' . h($k) . '</td><td>' . $v . '</td></tr>';
     }
+
     $deps = db()->query('SELECT * FROM deployments ORDER BY id DESC LIMIT 6')->fetchAll();
+    $last = $deps[0] ?? null;
+    $canDeploy = can('deploy');
     $dHtml = '';
     foreach ($deps as $d) {
-        $dHtml .= '<tr><td>#' . (int) $d['id'] . '</td><td>' . deploy_status_badge($d['status']) . '</td><td>' . h($d['actor'])
-            . '</td><td>' . h(fmt_time((int) $d['started_at'])) . '</td><td>' . (can('deploy') ? '<a href="?a=deploy_log&id=' . (int) $d['id'] . '">log</a>' : '') . '</td></tr>';
+        $tone = $d['status'] === 'success' ? 'ok' : ($d['status'] === 'failed' ? 'err' : 'warn');
+        $idTxt = '<b>' . h(ucfirst((string) $d['kind'])) . ' #' . (int) $d['id'] . '</b>';
+        $dHtml .= '<li><span class="dot ' . $tone . '"></span><span class="who">'
+            . ($canDeploy ? '<a href="?a=deploy_log&id=' . (int) $d['id'] . '">' . $idTxt . '</a>' : $idTxt)
+            . ' <span class="mute">by ' . h($d['actor']) . '</span></span>' . deploy_status_badge($d['status'])
+            . '<span class="when">' . ago((int) $d['started_at']) . '</span></li>';
     }
-    render('Dashboard', '<h1>Dashboard</h1>' . $warnHtml . '<div class="grid"><div class="card"><h2>Project</h2><div class="tbl"><table>' . $info
-        . '</table></div></div><div class="card"><h2>Recent deployments</h2>'
-        . ($dHtml ? '<div class="tbl"><table><tr><th>#</th><th>Status</th><th>By</th><th>Started</th><th></th></tr>' . $dHtml . '</table></div>' : '<p class="mute">None yet.</p>')
-        . (can('deploy') ? '<p><a class="btn" href="?a=deploy">Go to deploy →</a></p>' : '') . '</div></div>');
+
+    $freeGb = is_dir($root) ? round((float) @disk_free_space($root) / 1073741824, 1) : null;
+    $stats = '<div class="stats">'
+        . stat_tile('power', 'Application', $down ? 'Maintenance' : 'Online', $down ? 'artisan down is active' : 'Serving requests', $down ? 'err' : 'ok')
+        . stat_tile('branch', 'Git branch', $branch ? h($branch) : 'Not a repo',
+            $branch && $branch !== setting('branch') ? 'deploys <b>' . h(setting('branch')) . '</b>' : 'deploy branch: ' . h(setting('branch')),
+            !$isGit || ($branch && $branch !== setting('branch')) ? 'warn' : 'info')
+        . stat_tile('files', 'Working tree', !$isGit ? '—' : ($changes ? $changes . ' change' . ($changes === 1 ? '' : 's') : 'Clean'),
+            $changes ? 'uncommitted local edits' : 'matches HEAD', !$isGit ? '' : ($changes ? 'warn' : 'ok'))
+        . ($last
+            ? stat_tile('deploy', 'Last deployment', h(ucfirst((string) $last['status'])), ago((int) $last['started_at']) . ' by ' . h($last['actor']),
+                $last['status'] === 'success' ? 'ok' : ($last['status'] === 'failed' ? 'err' : 'info'))
+            : stat_tile('deploy', 'Last deployment', 'Never', 'no deployments yet'))
+        . stat_tile('disk', 'Disk free', $freeGb !== null ? h($freeGb . ' GB') : '—', 'on the project volume', $freeGb !== null && $freeGb < 2 ? 'warn' : '')
+        . '</div>';
+
+    $qa = '';
+    if ($canDeploy) {
+        $qa .= '<a class="btn primary" href="?a=deploy">' . icon('deploy') . 'Deploy now' . icon('arrow', 'go') . '</a>'
+            . '<form method="post" action="?a=deploy" data-once>' . csrf_field() . '<input type="hidden" name="op" value="check">'
+            . '<button type="submit">' . icon('refresh') . 'Check for updates' . icon('arrow', 'go') . '</button></form>';
+    }
+    foreach (['artisan' => ['artisan', 'Run artisan command'], 'terminal' => ['terminal', 'Open terminal'], 'env' => ['env', 'Edit environment'], 'keys' => ['keys', 'Manage SSH keys']] as $a => [$perm, $label]) {
+        if (can($perm)) {
+            $qa .= '<a class="btn" href="?a=' . $a . '">' . icon($a) . h($label) . icon('arrow', 'go') . '</a>';
+        }
+    }
+
+    $u = current_user();
+    render('Dashboard', page_head('Welcome back, ' . h($u['username']), 'Health of ' . basename($root) . ' at a glance.')
+        . $warnHtml . $stats
+        . '<div class="' . ($qa ? 'grid-main' : '') . '"><div class="stack"><div class="card"><h2>' . icon('dashboard') . 'Project</h2><div class="tbl"><table>' . $info . '</table></div></div>'
+        . '<div class="card"><div class="card-h"><h2>' . icon('clock') . 'Recent deployments</h2>'
+        . ($canDeploy && $deps ? '<a class="small" href="?a=deploy">View all</a>' : '') . '</div>'
+        . ($dHtml ? '<ul class="deps">' . $dHtml . '</ul>' : empty_state('deploy', 'No deployments yet.')) . '</div></div>'
+        . ($qa ? '<div class="card"><h2>' . icon('artisan') . 'Quick actions</h2><div class="qa">' . $qa . '</div></div>' : '')
+        . '</div>');
 }
 
 function deploy_status_badge(string $s): string
 {
-    return badge($s, $s === 'success' ? 'ok' : ($s === 'failed' ? 'err' : 'warn'));
+    return badge($s, $s === 'success' ? 'ok' : ($s === 'failed' ? 'err' : ($s === 'running' ? 'run' : 'warn')));
 }
 
 // ---- src/61-page-deploy.php ------------------------------------------
@@ -1761,8 +2218,8 @@ function page_deploy(): void
 
     $statusHtml = $status === '' ? badge('clean', 'ok')
         : badge(count(explode("\n", $status)) . ' local change(s)', 'warn')
-        . '<pre class="small">' . h(implode("\n", array_slice(explode("\n", $status), 0, 40))) . '</pre>'
-        . '<p class="small mute">With the "reset" strategy these tracked changes are overwritten on deploy.</p>';
+        . '<pre class="small" style="margin-top:10px;max-height:220px">' . h(implode("\n", array_slice(explode("\n", $status), 0, 40))) . '</pre>'
+        . '<p class="hint">With the "reset" strategy these tracked changes are overwritten on deploy.</p>';
 
     $deps = db()->query('SELECT id, actor, kind, branch, status, commit_before, commit_after, started_at, finished_at FROM deployments ORDER BY id DESC LIMIT 30')->fetchAll();
     $hist = '';
@@ -1773,36 +2230,48 @@ function page_deploy(): void
             $rb = '<form method="post" action="?a=deploy" data-once data-confirm="Roll back the code to ' . h(substr($d['commit_before'], 0, 12))
                 . ' and re-run your default post-deploy steps? Database migrations are NOT reverted.">' . csrf_field()
                 . '<input type="hidden" name="op" value="rollback"><input type="hidden" name="id" value="' . (int) $d['id'] . '">'
-                . '<button class="sm danger" type="submit">Roll back to before</button></form>';
+                . '<button class="sm danger" type="submit" title="Roll back to the commit before this deployment">' . icon('back') . 'Roll back</button></form>';
         }
-        $hist .= '<tr><td>#' . (int) $d['id'] . '</td><td>' . h($d['kind']) . '</td><td>' . deploy_status_badge($d['status']) . '</td><td>' . h($d['actor'])
-            . '</td><td><code>' . h(substr((string) $d['commit_before'], 0, 8) ?: '—') . '</code> → <code>' . h(substr((string) $d['commit_after'], 0, 8) ?: '—') . '</code></td><td>'
-            . h(fmt_time((int) $d['started_at'])) . '</td><td>' . h($dur) . '</td><td class="row"><a href="?a=deploy_log&id=' . (int) $d['id'] . '">log</a>' . $rb . '</td></tr>';
+        $hist .= '<tr><td><a href="?a=deploy_log&id=' . (int) $d['id'] . '"><b>#' . (int) $d['id'] . '</b></a></td><td>' . h(ucfirst((string) $d['kind'])) . '</td><td>' . deploy_status_badge($d['status'])
+            . '</td><td><span class="row" style="flex-wrap:nowrap;gap:8px">' . avatar((string) $d['actor']) . h($d['actor']) . '</span></td><td style="white-space:nowrap"><code>' . h(substr((string) $d['commit_before'], 0, 8) ?: '—')
+            . '</code> <span class="mute">→</span> <code>' . h(substr((string) $d['commit_after'], 0, 8) ?: '—') . '</code></td><td style="white-space:nowrap">'
+            . ago((int) $d['started_at']) . '</td><td>' . h($dur) . '</td><td><div class="row end"><a class="btn sm" href="?a=deploy_log&id=' . (int) $d['id'] . '">View log</a>' . $rb . '</div></td></tr>';
     }
 
-    render('Deploy', '<h1>Deploy</h1><div class="grid">'
-        . '<div class="card"><h2>Current state</h2><div class="tbl"><table>'
-        . '<tr><td class="k">Repository</td><td>' . ($remote ? '<code>' . h($remote) . '</code>' : badge('not configured', 'warn')) . '</td></tr>'
-        . '<tr><td class="k">Deploy branch</td><td><code>' . h($branch) . '</code></td></tr>'
-        . '<tr><td class="k">Auth</td><td>' . h(setting('git_auth')) . (setting('git_auth') === 'ssh' ? ' (' . h(setting('ssh_key') ?: 'no key selected') . ')' : '') . '</td></tr>'
-        . '<tr><td class="k">Strategy</td><td>' . (setting('sync_strategy') === 'ff' ? 'fast-forward only' : 'force-sync (reset to remote)') . '</td></tr>'
-        . '<tr><td class="k">HEAD</td><td>' . ($head ? h($subject) . '<br><span class="mute small">' . h($meta) . ' · <code>' . h(substr($hash, 0, 12)) . '</code></span>' : '—') . '</td></tr>'
-        . '<tr><td class="k">Working tree</td><td>' . ($isGit ? $statusHtml : badge('not a git repo yet — first deploy will initialise it in place', 'warn')) . '</td></tr>'
-        . '</table></div>'
-        . '<form method="post" action="?a=deploy" data-once class="row" style="margin-top:12px">' . csrf_field()
-        . '<input type="hidden" name="op" value="check"><button type="submit">Check for updates</button></form></div>'
-        . '<div class="card"><h2>Deploy now</h2><form method="post" action="?a=deploy" data-once data-confirm="Deploy origin/' . h($branch) . ' now?">' . csrf_field()
-        . '<input type="hidden" name="op" value="deploy"><p class="mute small">1. fetch origin/' . h($branch) . ' → 2. sync files → 3. selected steps:</p>'
-        . steps_checkboxes(default_steps()) . '<p><button class="primary" type="submit">Deploy</button></p></form></div></div>'
-        . '<div class="card"><h2>History</h2>' . ($hist ? '<div class="tbl"><table><tr><th>#</th><th>Type</th><th>Status</th><th>By</th><th>Commits</th><th>Started</th><th>Took</th><th></th></tr>'
-            . $hist . '</table></div>' : '<p class="mute">No deployments yet.</p>') . '</div>');
+    $checkBtn = '<form method="post" action="?a=deploy" data-once>' . csrf_field()
+        . '<input type="hidden" name="op" value="check"><button type="submit">' . icon('refresh') . 'Check for updates</button></form>';
+    $kv = [
+        'Repository'    => $remote ? '<code>' . h($remote) . '</code>' : badge('not configured', 'warn'),
+        'Deploy branch' => '<code>' . h($branch) . '</code>',
+        'Auth'          => h(setting('git_auth')) . (setting('git_auth') === 'ssh' ? ' <span class="mute">(' . h(setting('ssh_key') ?: 'no key selected') . ')</span>' : ''),
+        'Strategy'      => setting('sync_strategy') === 'ff' ? 'Fast-forward only' : 'Force-sync (reset to remote)',
+        'HEAD'          => $head ? h($subject) . '<br><span class="mute small">' . h($meta) . ' · <code>' . h(substr($hash, 0, 12)) . '</code></span>' : '—',
+        'Working tree'  => $isGit ? $statusHtml : badge('not a git repo yet — first deploy will initialise it in place', 'warn'),
+    ];
+    $kvHtml = '';
+    foreach ($kv as $k => $v) {
+        $kvHtml .= '<dt>' . h($k) . '</dt><dd>' . $v . '</dd>';
+    }
+
+    render('Deploy', page_head('Deploy', 'Pull the latest code from origin/' . $branch . ' and run your post-deploy steps.', $checkBtn)
+        . '<div class="grid-main">'
+        . '<form method="post" action="?a=deploy" class="card" data-once data-confirm="Deploy origin/' . h($branch) . ' to this server now?">' . csrf_field()
+        . '<input type="hidden" name="op" value="deploy"><h2>' . icon('deploy') . 'Deploy now</h2>'
+        . '<ol class="pipeline"><li><b>Fetch</b>origin/' . h($branch) . '</li><li><b>Sync</b>update files</li><li><b>Run steps</b>selected below</li></ol>'
+        . '<div class="sub-h" style="margin-top:0">Post-deploy steps</div>' . steps_checkboxes(default_steps())
+        . '<p class="hint">Defaults come from Settings. Untick anything you want to skip for this run.</p>'
+        . '<div class="actions"><button class="primary btn-lg" type="submit">' . icon('deploy') . 'Deploy ' . h($branch) . '</button></div></form>'
+        . '<div class="card"><h2>' . icon('branch') . 'Current state</h2><dl class="kv">' . $kvHtml . '</dl></div></div>'
+        . '<div class="card"><div class="card-h"><h2>' . icon('clock') . 'History</h2><span class="small mute">Last 30 runs</span></div>'
+        . ($hist ? '<div class="tbl"><table><tr><th>#</th><th>Type</th><th>Status</th><th>By</th><th>Commits</th><th>Started</th><th>Took</th><th></th></tr>'
+            . $hist . '</table></div>' : empty_state('deploy', 'No deployments yet — your first run will appear here.')) . '</div>');
 }
 
 function do_deploy(): void
 {
     $op = (string) ($_POST['op'] ?? '');
     $actor = current_user()['username'];
-    $back = '<p class="row" style="margin-top:12px"><a class="btn" href="?a=deploy">← Back to deploy</a></p>';
+    $back = back_link('?a=deploy', 'Back to deploy');
 
     if ($op === 'check') {
         $root = project_root();
@@ -1860,7 +2329,7 @@ function do_deploy(): void
         }
         stream_begin($op === 'deploy' ? 'Deploying' : 'Rolling back');
         $r = deploy_run($actor, $steps, $target, 'stream_out');
-        stream_end('<div class="flash ' . ($r['ok'] ? 'ok' : 'err') . '" style="margin-top:12px">' . h($r['msg'])
+        stream_end('<div class="flash ' . ($r['ok'] ? 'ok' : 'err') . '">' . h($r['msg'])
             . ($r['id'] ? ' <a href="?a=deploy_log&id=' . $r['id'] . '">Permanent log #' . $r['id'] . '</a>' : '') . '</div>' . $back);
         return;
     }
@@ -1876,10 +2345,12 @@ function page_deploy_log(): void
         flash('err', 'Deployment not found.');
         redirect('?a=deploy');
     }
-    render('Deployment #' . $d['id'], '<h1>' . h(ucfirst($d['kind'])) . ' #' . (int) $d['id'] . ' ' . deploy_status_badge($d['status']) . '</h1>'
-        . '<p class="mute">By ' . h($d['actor']) . ' · ' . h(fmt_time((int) $d['started_at'])) . ' → ' . h(fmt_time((int) $d['finished_at']))
-        . ' · steps: ' . h((string) $d['steps']) . '</p><pre class="log">' . h((string) $d['log']) . '</pre>'
-        . '<p style="margin-top:12px"><a class="btn" href="?a=deploy">← Back</a></p>');
+    $dur = $d['finished_at'] ? ((int) $d['finished_at'] - (int) $d['started_at']) . 's' : null;
+    render('Deployment #' . $d['id'], page_head(h(ucfirst($d['kind'])) . ' #' . (int) $d['id'] . ' ' . deploy_status_badge($d['status']),
+        'By ' . $d['actor'] . ' · started ' . fmt_time((int) $d['started_at']) . ($dur !== null ? ' · took ' . $dur : ''),
+        '<a class="btn" href="?a=deploy">' . icon('back') . 'All deployments</a>')
+        . '<div class="tips"><span>' . icon('list') . 'Steps: ' . h(str_replace(',', ', ', (string) $d['steps'])) . '</span></div>'
+        . '<pre class="log">' . h((string) $d['log']) . '</pre>');
 }
 
 // ---- src/62-page-artisan.php -----------------------------------------
@@ -1936,21 +2407,25 @@ function artisan_catalog(): array
 
 function page_artisan(): void
 {
-    $html = '<h1>Artisan</h1><div class="stack">';
+    $icons = ['Deployment' => 'deploy', 'Optimise & caches' => 'artisan', 'Queue' => 'list', 'Information' => 'search'];
+    $html = page_head('Artisan', 'Run common php artisan commands with one click. Commands marked in red ask for confirmation first.')
+        . '<form method="post" action="?a=artisan" data-once class="card">' . csrf_field()
+        . '<input type="hidden" name="op" value="custom"><h2>' . icon('terminal') . 'Run any command</h2><div class="row">'
+        . '<div class="cmdline"><span>php artisan</span><input type="text" name="args" placeholder="cache:forget some-key" required maxlength="500" aria-label="Artisan arguments" autocomplete="off" spellcheck="false"></div>'
+        . '<button class="primary" type="submit">' . icon('arrow') . 'Run</button></div>'
+        . '<p class="hint">Runs without a shell (arguments are passed literally). Blocked: ' . h(implode(', ', DPLY_ARTISAN_DENY)) . '.</p></form>'
+        . '<div class="row" style="margin:6px 0 18px"><div class="searchbox">' . icon('search')
+        . '<input type="text" data-search=".acmd" placeholder="Filter commands…" aria-label="Filter commands" autocomplete="off"></div>'
+        . '<span class="small mute">Press <kbd>/</kbd> to search</span></div>';
     foreach (artisan_catalog() as $group => $cmds) {
-        $html .= '<div class="card"><h2>' . h($group) . '</h2><div class="agrid">';
+        $html .= '<div class="card" data-group><h2>' . icon($icons[$group] ?? 'artisan') . h($group) . ' <span class="badge">' . count($cmds) . '</span></h2><div class="agrid">';
         foreach ($cmds as $k => [$label, , $confirm]) {
-            $html .= '<form method="post" action="?a=artisan" data-once' . ($confirm ? ' data-confirm="' . h($confirm) . '"' : '') . '>' . csrf_field()
+            $html .= '<form method="post" action="?a=artisan" class="acmd" data-once' . ($confirm ? ' data-confirm="' . h($confirm) . '"' : '') . '>' . csrf_field()
                 . '<input type="hidden" name="op" value="run"><input type="hidden" name="cmd" value="' . h($k) . '">'
-                . '<button type="submit"' . ($confirm ? ' class="danger"' : '') . '>' . h($label) . '</button></form>';
+                . '<button type="submit"' . ($confirm ? ' class="danger" title="' . h($confirm) . '"' : '') . '>' . icon($confirm ? 'alert' : 'arrow') . h($label) . '</button></form>';
         }
         $html .= '</div></div>';
     }
-    $html .= '<div class="card"><h2>Custom command</h2><form method="post" action="?a=artisan" data-once>' . csrf_field()
-        . '<input type="hidden" name="op" value="custom"><div class="row"><code>php artisan</code>'
-        . '<input type="text" name="args" placeholder="e.g. cache:forget some-key" required maxlength="500" style="flex:1;min-width:200px">'
-        . '<button class="primary" type="submit">Run</button></div>'
-        . '<p class="small mute">Runs without a shell (arguments are passed literally). Blocked: ' . h(implode(', ', DPLY_ARTISAN_DENY)) . '.</p></form></div></div>';
     render('Artisan', $html);
 }
 
@@ -1991,7 +2466,7 @@ function do_artisan(): void
     stream_out('$ ' . cmd_display($cmd) . "\n\n");
     $r = run_proc($cmd, project_root(), proc_env(), cmd_timeout(), 'stream_out');
     stream_out(($r['timeout'] ? "\n[timed out]" : '') . "\n[exit {$r['code']}]\n");
-    stream_end('<p class="row" style="margin-top:12px"><a class="btn" href="?a=artisan">← Back to artisan</a></p>');
+    stream_end(back_link('?a=artisan', 'Back to artisan'));
 }
 
 // ---- src/63-page-terminal.php ----------------------------------------
@@ -2026,13 +2501,14 @@ inp.addEventListener('keydown',function(e){
 });
 document.getElementById('tbox').addEventListener('click',function(){if(!window.getSelection().toString())inp.focus();});inp.focus();})();
 JS;
-    $allow = $full ? '' : '<details class="card"><summary>Allowed commands (restricted mode)</summary><pre class="small">' . h(implode("\n", lines(setting('term_allow')))) . '</pre></details>';
-    render('Terminal', '<h1>Terminal ' . ($full ? badge('unrestricted shell', 'warn') : badge('restricted', 'ok')) . '</h1>'
-        . '<p class="mute small">Non-interactive: each command runs to completion (timeout 5 min) in the shown directory. '
-        . 'git commands automatically use the configured token / SSH key. <code>cd</code> is remembered; ↑/↓ history; <code>clear</code> or Ctrl+L.'
-        . ($full ? ' The active SSH key path is in <code>$DPLY_SSH_KEY</code>.' : ' No shell: pipes, redirects and variables are not interpreted; <code>..</code> is not allowed.') . '</p>'
-        . '<div class="term" id="tbox"><div class="term-out" id="tout"></div><div class="term-in"><span class="cwd" id="tcwd">' . h($cwd) . '</span><span>$</span>'
+    $allow = $full ? '' : '<details class="card"><summary>Allowed commands in restricted mode</summary><pre class="small">' . h(implode("\n", lines(setting('term_allow')))) . '</pre></details>';
+    render('Terminal', page_head('Terminal ' . ($full ? badge('unrestricted shell', 'warn') : badge('restricted', 'ok')),
+        'Non-interactive: each command runs to completion (timeout 5 min). git automatically uses the configured token / SSH key.'
+        . ($full ? ' The active SSH key path is in $DPLY_SSH_KEY.' : ' No shell: pipes, redirects and variables are not interpreted; ".." is not allowed.'))
+        . '<div class="term" id="tbox"><div class="term-bar"><span class="term-dots"><i></i><i></i><i></i></span><span class="t">' . h(proc_user()) . '@' . h((string) (gethostname() ?: 'server'))
+        . '</span><span>' . ($full ? 'sh' : 'restricted') . '</span></div><div class="term-out" id="tout" aria-live="polite"></div><div class="term-in"><span class="cwd" id="tcwd" title="' . h($cwd) . '">' . h($cwd) . '</span><span style="color:#5e697a">$</span>'
         . '<input id="tin" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Command"></div></div>'
+        . '<div class="tips"><span><kbd>↑</kbd><kbd>↓</kbd> history</span><span><kbd>Ctrl</kbd>+<kbd>L</kbd> or <code>clear</code> to clear</span><span><code>cd</code> is remembered</span></div>'
         . '<input type="hidden" id="tcsrf" value="' . h(csrf_token()) . '">' . $allow
         . '<script nonce="' . csp_nonce() . '">' . $js . '</script>');
 }
@@ -2203,20 +2679,21 @@ function page_env(): void
     $bk = '';
     foreach (array_slice(env_backups(), 0, 20) as $b) {
         $bn = basename($b);
-        $bk .= '<tr><td><code>' . h($bn) . '</code></td><td>' . h(fmt_time((int) filemtime($b))) . '</td><td><a href="?a=env&load=' . h(rawurlencode($bn)) . '">load into editor</a></td></tr>';
+        $bk .= '<tr><td><code>' . h($bn) . '</code></td><td style="white-space:nowrap">' . ago((int) filemtime($b)) . '</td><td><div class="row end"><a class="btn sm" href="?a=env&load=' . h(rawurlencode($bn)) . '">' . icon('download') . 'Load</a></div></td></tr>';
     }
     audit('env.view', 'Opened .env editor');
-    render('.env', '<h1>Environment (.env)</h1>' . $note
-        . ($cached ? '<div class="flash warn">Config is cached — changes take effect only after config:cache/config:clear (choose below).</div>' : '')
-        . '<form method="post" action="?a=env" class="card">' . csrf_field()
+    $lineCount = $content === '' ? 0 : substr_count($content, "\n") + 1;
+    render('.env', page_head('Environment', 'Edit ' . $f . ' — a timestamped backup is taken before every save.') . $note
+        . ($cached ? '<div class="flash warn">Config is cached — changes take effect only after config:cache / config:clear (choose below).</div>' : '')
+        . '<div class="grid-main"><form method="post" action="?a=env" class="card">' . csrf_field()
         . '<input type="hidden" name="op" value="save"><input type="hidden" name="hash" value="' . h($hash) . '">'
-        . '<p class="small mute"><code>' . h($f) . '</code> · a timestamped backup is taken before every save.</p>'
-        . '<textarea name="content" rows="28" spellcheck="false" autocomplete="off">' . h($content) . '</textarea>'
-        . '<div class="row" style="margin-top:10px"><label class="chk"><input type="checkbox" name="force" value="1"><span>Save even if validation reports problems</span></label></div>'
-        . '<div class="row"><select name="after" style="width:auto"><option value="config_cache"' . ($cached ? ' selected' : '') . '>then run config:cache</option>'
-        . '<option value="config_clear">then run config:clear</option><option value="none"' . ($cached ? '' : ' selected') . '>do nothing else</option></select>'
-        . '<button class="primary" type="submit" data-confirm="Write these changes to .env?">Save .env</button></div></form>'
-        . '<div class="card"><h2>Backups</h2>' . ($bk ? '<div class="tbl"><table>' . $bk . '</table></div>' : '<p class="mute">None yet.</p>') . '</div>');
+        . '<div class="card-h"><h2>' . icon('env') . '.env</h2><span class="small mute">' . $lineCount . ' lines</span></div>'
+        . '<textarea name="content" rows="28" spellcheck="false" autocomplete="off" aria-label=".env contents">' . h($content) . '</textarea>'
+        . '<div class="actions"><label class="chk" style="margin:0"><input type="checkbox" name="force" value="1"><span>Save even if validation reports problems</span></label>'
+        . '<div class="row" style="margin-left:auto"><select name="after" style="width:auto" aria-label="After saving"><option value="config_cache"' . ($cached ? ' selected' : '') . '>Then run config:cache</option>'
+        . '<option value="config_clear">Then run config:clear</option><option value="none"' . ($cached ? '' : ' selected') . '>Do nothing else</option></select>'
+        . '<button class="primary" type="submit" data-confirm="Write these changes to .env?">' . icon('check') . 'Save .env</button></div></div></form>'
+        . '<div class="card"><h2>' . icon('clock') . 'Backups</h2>' . ($bk ? '<div class="tbl"><table>' . $bk . '</table></div>' : empty_state('clock', 'No backups yet.')) . '</div></div>');
 }
 
 function do_env(): void
@@ -2317,40 +2794,39 @@ function list_keys(): array
 function page_keys(): void
 {
     $active = setting('ssh_key');
-    $html = '<h1>SSH keys</h1>';
+    $html = page_head('SSH keys', 'Add a key\'s public part to your repository as a read-only deploy key, mark it active, and set Git auth to ssh in Settings.');
     if (!find_bin('ssh-keygen')) {
         $html .= '<div class="flash err">ssh-keygen was not found in PATH — install openssh-client.</div>';
     }
-    $html .= '<p class="mute">Keys live in <code>' . h(ssh_key_dir()) . '</code> (0600). Add a key\'s public part to your repository as a read-only '
-        . '<em>deploy key</em>, select it as active and set Git auth to <code>ssh</code> in Settings.</p>';
+    $keysHtml = '';
     foreach (list_keys() as $name => $k) {
         $isActive = $name === $active;
-        $html .= '<div class="card"><div class="row" style="justify-content:space-between"><h2 style="margin:0">' . h($name) . ' ' . ($isActive ? badge('active', 'ok') : '') . '</h2>'
-            . '<div class="row">'
-            . ($isActive ? '' : '<form method="post" action="?a=keys">' . csrf_field() . '<input type="hidden" name="op" value="activate"><input type="hidden" name="name" value="' . h($name) . '"><button class="sm" type="submit">Use for git</button></form>')
+        $keysHtml .= '<div class="card"><div class="ucard-h"><div class="key-ic' . ($isActive ? ' on' : '') . '">' . icon('keys') . '</div><div class="n"><b>' . h($name) . ' ' . ($isActive ? badge('active for git', 'ok') : '') . '</b>'
+            . '<small><code>' . h($k['fp']) . '</code> · created ' . ago($k['mtime']) . '</small></div><div class="row">'
+            . ($isActive ? '' : '<form method="post" action="?a=keys">' . csrf_field() . '<input type="hidden" name="op" value="activate"><input type="hidden" name="name" value="' . h($name) . '"><button class="sm" type="submit">' . icon('check') . 'Use for git</button></form>')
             . '<form method="post" action="?a=keys" data-confirm="Delete key ' . h($name) . ' permanently?">' . csrf_field() . '<input type="hidden" name="op" value="delete"><input type="hidden" name="name" value="' . h($name) . '"><button class="sm danger" type="submit">Delete</button></form>'
-            . '</div></div><p class="small mute">' . h($k['fp']) . ' · created ' . h(fmt_time($k['mtime'])) . '</p>'
-            . '<textarea rows="3" readonly>' . h($k['pub']) . '</textarea></div>';
+            . '</div></div><label style="margin:0"><span>Public key — paste this into your repository\'s deploy keys</span><textarea rows="3" readonly>' . h($k['pub']) . '</textarea></label></div>';
     }
+    $html .= $keysHtml !== '' ? $keysHtml : '<div class="card">' . empty_state('keys', 'No SSH keys yet. Generate one below or import an existing key.') . '</div>';
     $kh = is_file(known_hosts()) ? (string) file_get_contents(known_hosts()) : '';
     $html .= '<div class="grid">'
-        . '<form method="post" action="?a=keys" class="card">' . csrf_field() . '<h2>Generate new key (ed25519)</h2><input type="hidden" name="op" value="generate">'
+        . '<form method="post" action="?a=keys" class="card">' . csrf_field() . '<h2>' . icon('plus') . 'Generate new key <span class="badge">ed25519</span></h2><input type="hidden" name="op" value="generate">'
         . '<label><span>Name</span><input type="text" name="name" value="deploy_' . date('Ymd') . '" pattern="[A-Za-z0-9_][A-Za-z0-9_.\-]{0,63}" required></label>'
         . '<label><span>Comment</span><input type="text" name="comment" value="dply@' . h((string) (gethostname() ?: 'server')) . '" maxlength="100"></label>'
-        . '<button class="primary" type="submit">Generate</button></form>'
-        . '<form method="post" action="?a=keys" class="card">' . csrf_field() . '<h2>Import existing private key</h2><input type="hidden" name="op" value="import">'
+        . '<button class="primary" type="submit">' . icon('plus') . 'Generate key</button></form>'
+        . '<form method="post" action="?a=keys" class="card">' . csrf_field() . '<h2>' . icon('download') . 'Import existing private key</h2><input type="hidden" name="op" value="import">'
         . '<label><span>Name</span><input type="text" name="name" pattern="[A-Za-z0-9_][A-Za-z0-9_.\-]{0,63}" required></label>'
-        . '<label><span>Private key (OpenSSH/PEM, without passphrase)</span><textarea name="private" rows="6" required spellcheck="false" autocomplete="off"></textarea></label>'
-        . '<button type="submit">Import</button></form>'
-        . '<div class="card"><h2>Known hosts &amp; connection test</h2>'
-        . '<form method="post" action="?a=keys" class="row">' . csrf_field() . '<input type="hidden" name="op" value="scan">'
-        . '<input type="text" name="host" placeholder="github.com or host:port" required style="flex:1;min-width:160px"><button type="submit">Add host key</button></form>'
-        . '<form method="post" action="?a=keys" class="row" style="margin-top:8px">' . csrf_field() . '<input type="hidden" name="op" value="test">'
-        . '<input type="text" name="target" placeholder="git@github.com" value="git@github.com" required style="flex:1;min-width:160px"><button type="submit">Test active key</button></form>'
-        . '<p class="small mute">Unknown hosts are trusted on first use (accept-new) and recorded below.</p>'
-        . '<pre class="small">' . h($kh !== '' ? $kh : '(empty)') . '</pre>'
-        . ($kh !== '' ? '<form method="post" action="?a=keys" data-confirm="Clear all known host keys?" style="margin-top:8px">' . csrf_field() . '<input type="hidden" name="op" value="clear_hosts"><button class="sm danger" type="submit">Clear known hosts</button></form>' : '')
-        . '</div></div>';
+        . '<label><span>Private key (OpenSSH/PEM, without passphrase)</span><textarea name="private" rows="5" required spellcheck="false" autocomplete="off" placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"></textarea></label>'
+        . '<button type="submit">' . icon('download') . 'Import key</button></form></div>'
+        . '<div class="card"><div class="card-h"><h2>' . icon('security') . 'Known hosts &amp; connection test</h2>'
+        . ($kh !== '' ? '<form method="post" action="?a=keys" data-confirm="Clear all known host keys?">' . csrf_field() . '<input type="hidden" name="op" value="clear_hosts"><button class="sm danger" type="submit">Clear known hosts</button></form>' : '')
+        . '</div><div class="grid" style="margin-bottom:14px">'
+        . '<form method="post" action="?a=keys">' . csrf_field() . '<input type="hidden" name="op" value="scan"><label><span>Trust a host</span><div class="row">'
+        . '<input type="text" name="host" placeholder="github.com or host:port" required style="flex:1;min-width:160px"><button type="submit">' . icon('plus') . 'Add host key</button></div></label></form>'
+        . '<form method="post" action="?a=keys">' . csrf_field() . '<input type="hidden" name="op" value="test"><label><span>Test the active key</span><div class="row">'
+        . '<input type="text" name="target" placeholder="git@github.com" value="git@github.com" required style="flex:1;min-width:160px"><button type="submit">' . icon('sync') . 'Test connection</button></div></label></form></div>'
+        . '<p class="hint" style="margin:0 0 10px">Unknown hosts are trusted on first use (accept-new) and recorded below.</p>'
+        . '<pre class="small">' . h($kh !== '' ? $kh : '(empty)') . '</pre></div>';
     render('SSH keys', $html);
 }
 
@@ -2504,7 +2980,7 @@ function perm_checkboxes(array $selected, bool $disableAdmin = false): string
     foreach (DPLY_PERMS as $k => $label) {
         $dis = $disableAdmin && $k === 'admin';
         $o .= '<label class="chk"><input type="checkbox" name="perms[]" value="' . h($k) . '"' . (in_array($k, $selected, true) ? ' checked' : '')
-            . ($dis ? ' disabled' : '') . '><span><code>' . h($k) . '</code> <span class="mute small">' . h($label) . '</span></span></label>';
+            . ($dis ? ' disabled' : '') . '><span><b style="font-weight:600">' . h($k) . '</b><br><span class="mute small">' . h($label) . '</span></span></label>';
         if ($dis && in_array($k, $selected, true)) {
             $o .= '<input type="hidden" name="perms[]" value="admin">';
         }
@@ -2515,35 +2991,38 @@ function perm_checkboxes(array $selected, bool $disableAdmin = false): string
 function page_users(): void
 {
     $me = current_user();
-    $html = '<h1>Users</h1>';
-    foreach (db()->query('SELECT * FROM users ORDER BY username')->fetchAll() as $u) {
+    $all = db()->query('SELECT * FROM users ORDER BY username')->fetchAll();
+    $html = page_head('Users', 'Who can sign in, and what each person is allowed to do.', '<a class="btn primary" href="#add-user">' . icon('plus') . 'Add user</a>');
+    foreach ($all as $u) {
         $id = (int) $u['id'];
         $self = $id === (int) $me['id'];
         $perms = array_filter(explode(',', (string) $u['perms']));
         $locked = (int) $u['locked_until'] > time();
         $hid = csrf_field() . '<input type="hidden" name="id" value="' . $id . '">';
-        $html .= '<div class="card"><div class="row" style="justify-content:space-between"><h2 style="margin:0">' . h($u['username']) . ' '
-            . ((int) $u['active'] ? badge('active', 'ok') : badge('disabled', 'err')) . ' ' . ($u['totp_secret'] ? badge('2FA', 'ok') : '')
-            . ($locked ? ' ' . badge('locked until ' . date('H:i', (int) $u['locked_until']), 'err') : '') . ($self ? ' ' . badge('you') : '') . '</h2>'
-            . '<span class="small mute">last login ' . h(fmt_time($u['last_login_at'] ? (int) $u['last_login_at'] : null)) . ($u['last_login_ip'] ? ' from ' . h($u['last_login_ip']) : '') . '</span></div>'
-            . '<div class="grid" style="margin-top:12px"><form method="post" action="?a=users">' . $hid . '<input type="hidden" name="op" value="update">'
-            . perm_checkboxes($perms, $self)
-            . '<label class="chk"><input type="checkbox" name="active" value="1"' . ((int) $u['active'] ? ' checked' : '') . ($self ? ' disabled' : '') . '><span>Account enabled</span></label>'
-            . ($self ? '<input type="hidden" name="active" value="1">' : '')
-            . '<button type="submit">Save permissions</button></form>'
-            . '<div class="stack"><form method="post" action="?a=users">' . $hid . '<input type="hidden" name="op" value="password">'
-            . '<label><span>New password (min 12)</span><input type="password" name="password" autocomplete="new-password" required minlength="12"></label>'
-            . '<button type="submit">Set password</button></form><div class="row">'
-            . ($locked || (int) $u['failed_count'] ? '<form method="post" action="?a=users">' . $hid . '<input type="hidden" name="op" value="unlock"><button class="sm" type="submit">Unlock</button></form>' : '')
+        $html .= '<div class="card"><div class="ucard-h">' . avatar((string) $u['username']) . '<div class="n"><b>' . h($u['username']) . ' '
+            . ((int) $u['active'] ? badge('active', 'ok') : badge('disabled', 'err')) . ($u['totp_secret'] ? badge('2FA', 'ok') : '')
+            . ($locked ? badge('locked until ' . date('H:i', (int) $u['locked_until']), 'err') : '') . ($self ? badge('you') : '') . '</b>'
+            . '<small>Last login ' . ($u['last_login_at'] ? ago((int) $u['last_login_at']) : 'never') . ($u['last_login_ip'] ? ' from ' . h($u['last_login_ip']) : '') . '</small></div>'
+            . '<div class="row">'
+            . ($locked || (int) $u['failed_count'] ? '<form method="post" action="?a=users">' . $hid . '<input type="hidden" name="op" value="unlock"><button class="sm" type="submit">' . icon('lock') . 'Unlock</button></form>' : '')
             . ($u['totp_secret'] ? '<form method="post" action="?a=users" data-confirm="Remove 2FA from this user?">' . $hid . '<input type="hidden" name="op" value="reset2fa"><button class="sm" type="submit">Reset 2FA</button></form>' : '')
-            . '<form method="post" action="?a=users">' . $hid . '<input type="hidden" name="op" value="kill"><button class="sm" type="submit">Sign out everywhere</button></form>'
-            . ($self ? '' : '<form method="post" action="?a=users" data-confirm="Delete user ' . h($u['username']) . '?">' . $hid . '<input type="hidden" name="op" value="delete"><button class="sm danger" type="submit">Delete</button></form>')
-            . '</div></div></div></div>';
+            . '<form method="post" action="?a=users" data-confirm="Sign ' . h($u['username']) . ' out of every session?">' . $hid . '<input type="hidden" name="op" value="kill"><button class="sm" type="submit">' . icon('logout') . 'Sign out everywhere</button></form>'
+            . ($self ? '' : '<form method="post" action="?a=users" data-confirm="Delete user ' . h($u['username']) . '? This cannot be undone.">' . $hid . '<input type="hidden" name="op" value="delete"><button class="sm danger" type="submit">Delete</button></form>')
+            . '</div></div>'
+            . '<div class="grid-main" style="margin:0"><form method="post" action="?a=users">' . $hid . '<input type="hidden" name="op" value="update">'
+            . '<div class="sub-h" style="margin-top:0">Permissions</div><div class="chks">' . perm_checkboxes($perms, $self)
+            . '<label class="chk"><input type="checkbox" name="active" value="1"' . ((int) $u['active'] ? ' checked' : '') . ($self ? ' disabled' : '') . '><span><b style="font-weight:600">Account enabled</b><br><span class="mute small">Disabled accounts cannot sign in</span></span></label></div>'
+            . ($self ? '<input type="hidden" name="active" value="1">' : '')
+            . '<button type="submit">' . icon('check') . 'Save permissions</button></form>'
+            . '<form method="post" action="?a=users">' . $hid . '<input type="hidden" name="op" value="password"><div class="sub-h" style="margin-top:0">Reset password</div>'
+            . '<label><span>New password (min 12 characters)</span><input type="password" name="password" autocomplete="new-password" required minlength="12"></label>'
+            . '<button type="submit">' . icon('lock') . 'Set password</button></form></div></div>';
     }
-    $html .= '<form method="post" action="?a=users" class="card">' . csrf_field() . '<h2>Add user</h2><input type="hidden" name="op" value="create">'
-        . '<div class="grid"><div><label><span>Username</span><input type="text" name="username" pattern="[A-Za-z0-9_.@-]{3,64}" required></label>'
-        . '<label><span>Password (min 12)</span><input type="password" name="password" autocomplete="new-password" required minlength="12"></label></div>'
-        . '<div>' . perm_checkboxes(['deploy']) . '</div></div><button class="primary" type="submit">Create user</button></form>';
+    $html .= '<form method="post" action="?a=users" class="card" id="add-user">' . csrf_field() . '<h2>' . icon('plus') . 'Add user</h2><input type="hidden" name="op" value="create">'
+        . '<div class="grid-main" style="margin-bottom:6px"><div><div class="sub-h" style="margin-top:0">Permissions</div><div class="chks">' . perm_checkboxes(['deploy']) . '</div></div>'
+        . '<div><div class="sub-h" style="margin-top:0">Credentials</div><label><span>Username</span><input type="text" name="username" pattern="[A-Za-z0-9_.@-]{3,64}" required placeholder="jane.doe"></label>'
+        . '<label><span>Password (min 12 characters)</span><input type="password" name="password" autocomplete="new-password" required minlength="12"></label>'
+        . '<button class="primary" type="submit">' . icon('plus') . 'Create user</button></div></div></form>';
     render('Users', $html);
 }
 
@@ -2662,112 +3141,54 @@ function page_security(): void
         $activeB = (int) $b['until'] > $now;
         $bHtml .= '<tr><td><code>' . h($b['ip']) . '</code></td><td>' . ($activeB ? badge('blocked', 'err') : badge('expired')) . '</td><td>' . h(fmt_time((int) $b['until']))
             . '</td><td>' . (int) $b['strikes'] . '</td><td class="small">' . h($b['reason']) . '</td><td><form method="post" action="?a=security">' . csrf_field()
-            . '<input type="hidden" name="op" value="unblock"><input type="hidden" name="ip" value="' . h($b['ip']) . '"><button class="sm" type="submit">'
-            . ($activeB ? 'Unblock' : 'Forget') . '</button></form></td></tr>';
+            . '<input type="hidden" name="op" value="unblock"><input type="hidden" name="ip" value="' . h($b['ip']) . '"><div class="row end"><button class="sm" type="submit">'
+            . ($activeB ? 'Unblock' : 'Forget') . '</button></div></form></td></tr>';
     }
     $att = db()->query('SELECT * FROM attempts ORDER BY id DESC LIMIT 100')->fetchAll();
     $aHtml = '';
     foreach ($att as $a) {
-        $aHtml .= '<tr><td>' . h(fmt_time((int) $a['created_at'])) . '</td><td><code>' . h($a['ip']) . '</code></td><td>' . h($a['kind']) . '</td><td>' . h((string) $a['username']) . '</td></tr>';
+        $aHtml .= '<tr><td style="white-space:nowrap">' . ago((int) $a['created_at']) . '</td><td><code>' . h($a['ip']) . '</code></td><td>' . h($a['kind']) . '</td><td>' . h((string) $a['username']) . '</td></tr>';
     }
     $num = fn(string $k, string $label, int $div = 1) => '<label><span>' . h($label) . '</span><input type="number" min="1" name="' . h($k)
         . '" value="' . (int) ((int) setting($k) / $div) . '"></label>';
     $ip = client_ip();
-    render('Security', '<h1>Security</h1><div class="grid">'
-        . '<form method="post" action="?a=security" class="card">' . csrf_field() . '<h2>Lockout &amp; session policy</h2><input type="hidden" name="op" value="policy">'
+    $activeBlocks = count(array_filter($blocks, fn($b) => (int) $b['until'] > $now));
+    render('Security', page_head('Security', 'Lockout policy, the outer HTTP gate, and blocked addresses.')
+        . '<div class="stats">'
+        . stat_tile('lock', 'Blocked IPs', (string) $activeBlocks, 'currently active', $activeBlocks ? 'err' : 'ok')
+        . stat_tile('alert', 'Failed attempts', (string) count($att), 'in recent history', count($att) ? 'warn' : 'ok')
+        . stat_tile('security', 'Your IP', '<code>' . h($ip) . '</code>', setting('trust_proxy') === '1' ? 'via trusted proxy' : 'direct connection', 'info')
+        . '</div><div class="grid-main">'
+        . '<form method="post" action="?a=security" class="card">' . csrf_field() . '<h2>' . icon('security') . 'Lockout &amp; session policy</h2><input type="hidden" name="op" value="policy">'
+        . '<div class="sub-h" style="margin-top:0">Brute-force protection</div>'
         . $num('max_attempts', 'Failed attempts before an IP is blocked (also locks the account)')
-        . $num('attempt_window', 'Counting window (minutes)', 60)
-        . $num('block_seconds', 'First block duration (minutes) — doubles for each repeat', 60)
-        . $num('block_max', 'Maximum block duration (hours)', 3600)
-        . $num('session_idle', 'Idle session timeout (minutes)', 60)
-        . $num('session_absolute', 'Absolute session lifetime (hours)', 3600)
-        . $num('sudo_ttl', 'Password re-confirmation valid for (minutes)', 60)
+        . '<div class="field-row">' . $num('attempt_window', 'Counting window (minutes)', 60)
+        . $num('block_seconds', 'First block (minutes) — doubles on repeat', 60)
+        . $num('block_max', 'Maximum block (hours)', 3600) . '</div>'
+        . '<div class="sub-h">Sessions</div><div class="field-row">'
+        . $num('session_idle', 'Idle timeout (minutes)', 60)
+        . $num('session_absolute', 'Absolute lifetime (hours)', 3600)
+        . $num('sudo_ttl', 'Re-confirm password after (minutes)', 60) . '</div>'
+        . '<div class="sub-h">Network</div>'
         . '<label><span>IP allow-list — one IP or CIDR per line; empty = allow all. Your IP: <code>' . h($ip) . '</code></span>'
-        . '<textarea name="ip_allowlist" rows="4">' . h(setting('ip_allowlist')) . '</textarea></label>'
+        . '<textarea name="ip_allowlist" rows="4" placeholder="203.0.113.0/24">' . h(setting('ip_allowlist')) . '</textarea></label>'
         . '<label class="chk"><input type="checkbox" name="trust_proxy" value="1"' . (setting('trust_proxy') === '1' ? ' checked' : '') . '><span>Behind a reverse proxy / load balancer '
-        . '(use the last X-Forwarded-For hop). Enable ONLY if every request passes through your proxy, otherwise IPs can be spoofed.</span></label>'
-        . '<button class="primary" type="submit">Save policy</button></form>'
-        . '<div class="stack"><form method="post" action="?a=security" class="card">' . csrf_field() . '<h2>HTTP Basic auth credentials</h2><input type="hidden" name="op" value="http">'
+        . '(use the last X-Forwarded-For hop). <span class="mute">Enable ONLY if every request passes through your proxy, otherwise IPs can be spoofed.</span></span></label>'
+        . '<div class="actions"><button class="primary" type="submit">' . icon('check') . 'Save policy</button></div></form>'
+        . '<div class="stack"><form method="post" action="?a=security" class="card">' . csrf_field() . '<h2>' . icon('lock') . 'HTTP Basic auth</h2><input type="hidden" name="op" value="http">'
         . '<p class="small mute">The outer gate, separate from user accounts. Current username: <code>' . h(setting('http_user')) . '</code></p>'
         . '<label><span>Username</span><input type="text" name="http_user" value="' . h(setting('http_user')) . '" required maxlength="64"></label>'
         . '<label><span>New password (min 12)</span><input type="password" name="http_pass" autocomplete="new-password" required minlength="12"></label>'
         . '<label><span>Repeat new password</span><input type="password" name="http_pass2" autocomplete="new-password" required minlength="12"></label>'
-        . '<button type="submit" data-confirm="Change the HTTP auth credentials? Your browser will ask for the new ones.">Change</button></form>'
-        . '<form method="post" action="?a=security" class="card">' . csrf_field() . '<h2>Block an IP manually</h2><input type="hidden" name="op" value="block"><div class="row">'
-        . '<input type="text" name="ip" placeholder="203.0.113.7" required style="flex:1;min-width:140px"><input type="number" name="hours" value="24" min="1" style="width:90px"><span class="mute">hours</span>'
-        . '<button class="danger" type="submit">Block</button></div></form></div></div>'
-        . '<div class="card"><h2>Blocked addresses</h2>' . ($bHtml ? '<div class="tbl"><table><tr><th>IP</th><th>State</th><th>Until</th><th>Strikes</th><th>Reason</th><th></th></tr>' . $bHtml . '</table></div>' : '<p class="mute">None.</p>') . '</div>'
-        . '<div class="card"><div class="row" style="justify-content:space-between"><h2 style="margin:0">Recent failed attempts</h2>'
-        . '<form method="post" action="?a=security" data-confirm="Clear the failed-attempt history?">' . csrf_field() . '<input type="hidden" name="op" value="clear_attempts"><button class="sm" type="submit">Clear</button></form></div>'
-        . ($aHtml ? '<div class="tbl"><table><tr><th>When</th><th>IP</th><th>Type</th><th>Username tried</th></tr>' . $aHtml . '</table></div>' : '<p class="mute">None.</p>') . '</div>');
-}
-
-function do_security(): void
-{
-    $op = (string) ($_POST['op'] ?? '');
-    switch ($op) {
-        case 'unblock':
-            $ip = (string) ($_POST['ip'] ?? '');
-            db()->prepare('DELETE FROM blocks WHERE ip = ?')->execute([$ip]);
-            db()->prepare('DELETE FROM attempts WHERE ip = ?')->execute([$ip]);
-            audit('security.unblock', $ip);
-            flash('ok', "$ip unblocked.");
-            break;
-        case 'block':
-            $ip = trim((string) ($_POST['ip'] ?? ''));
-            if (!filter_var($ip, FILTER_VALIDATE_IP)) {
-                flash('err', 'Invalid IP address.');
-            } elseif ($ip === client_ip()) {
-                flash('err', 'Refusing to block your own address.');
-            } else {
-                block_ip($ip, 'Manual block', max(1, (int) ($_POST['hours'] ?? 24)) * 3600, current_user()['username']);
-                flash('ok', "$ip blocked.");
-            }
-            break;
-        case 'clear_attempts':
-            db()->exec('DELETE FROM attempts');
-            audit('security.clear_attempts', '');
-            flash('ok', 'Attempt history cleared.');
-            break;
-        case 'policy':
-            $allow = implode("\n", lines((string) ($_POST['ip_allowlist'] ?? '')));
-            foreach (lines($allow) as $r) {
-                if (@inet_pton(explode('/', $r)[0]) === false) {
-                    flash('err', "Invalid allow-list entry: $r");
-                    redirect('?a=security');
-                }
-            }
-            if ($allow !== '' && !ip_allowed(client_ip(), $allow)) {
-                flash('err', 'The allow-list must include your current IP (' . client_ip() . '), otherwise you would lock yourself out.');
-                redirect('?a=security');
-            }
-            $map = ['max_attempts' => 1, 'attempt_window' => 60, 'block_seconds' => 60, 'block_max' => 3600, 'session_idle' => 60, 'session_absolute' => 3600, 'sudo_ttl' => 60];
-            foreach ($map as $k => $mul) {
-                set_setting($k, (string) (max(1, (int) ($_POST[$k] ?? 1)) * $mul));
-            }
-            set_setting('ip_allowlist', $allow);
-            set_setting('trust_proxy', !empty($_POST['trust_proxy']) ? '1' : '0');
-            audit('security.policy', 'Policy updated');
-            flash('ok', 'Security policy saved.');
-            break;
-        case 'http':
-            $u = trim((string) ($_POST['http_user'] ?? ''));
-            $p = (string) ($_POST['http_pass'] ?? '');
-            if ($u === '' || strlen($u) > 64 || str_contains($u, ':')) {
-                flash('err', 'Username must be 1–64 characters and must not contain ":".');
-            } elseif ($p !== (string) ($_POST['http_pass2'] ?? '')) {
-                flash('err', 'Passwords do not match.');
-            } elseif ($e = pw_policy($p, $u)) {
-                flash('err', $e);
-            } else {
-                set_setting('http_user', $u);
-                set_setting('http_pass_hash', hash_pw($p));
-                audit('security.http_auth', "HTTP auth credentials changed (user $u)");
-                flash('ok', 'HTTP auth credentials changed. Your browser will prompt for them on the next request.');
-            }
-            break;
-    }
-    redirect('?a=security');
+        . '<button type="submit" data-confirm="Change the HTTP auth credentials? Your browser will ask for the new ones.">Change credentials</button></form>'
+        . '<form method="post" action="?a=security" class="card">' . csrf_field() . '<h2>' . icon('x') . 'Block an IP</h2><input type="hidden" name="op" value="block">'
+        . '<label><span>IP address</span><input type="text" name="ip" placeholder="203.0.113.7" required></label>'
+        . '<label><span>Duration (hours)</span><input type="number" name="hours" value="24" min="1"></label>'
+        . '<button class="danger" type="submit">Block address</button></form></div></div>'
+        . '<div class="card"><h2>' . icon('lock') . 'Blocked addresses</h2>' . ($bHtml ? '<div class="tbl"><table><tr><th>IP</th><th>State</th><th>Until</th><th>Strikes</th><th>Reason</th><th></th></tr>' . $bHtml . '</table></div>' : empty_state('security', 'No blocked addresses.')) . '</div>'
+        . '<div class="card"><div class="card-h"><h2>' . icon('alert') . 'Recent failed attempts</h2>'
+        . ($aHtml ? '<form method="post" action="?a=security" data-confirm="Clear the failed-attempt history?">' . csrf_field() . '<input type="hidden" name="op" value="clear_attempts"><button class="sm" type="submit">Clear history</button></form>' : '') . '</div>'
+        . ($aHtml ? '<div class="tbl"><table><tr><th>When</th><th>IP</th><th>Type</th><th>Username tried</th></tr>' . $aHtml . '</table></div>' : empty_state('check', 'No failed attempts. All quiet.')) . '</div>');
 }
 
 // ---- src/68-page-settings.php ----------------------------------------
@@ -2786,8 +3207,8 @@ function page_settings(): void
     foreach ($keys as $k) {
         $keyOpts .= '<option value="' . h($k) . '"' . (setting('ssh_key') === $k ? ' selected' : '') . '>' . h($k) . '</option>';
     }
-    render('Settings', '<h1>Settings</h1><form method="post" action="?a=settings">' . csrf_field() . '<div class="grid">'
-        . '<div class="card"><h2>Repository</h2>'
+    render('Settings', page_head('Settings', 'Where the code comes from, how it is synced, and which tools run it.') . '<form method="post" action="?a=settings">' . csrf_field() . '<div class="grid">'
+        . '<div class="card"><h2>' . icon('branch') . 'Repository</h2>'
         . '<label><span>Project root (the Laravel app to deploy)</span><input type="text" name="project_root" value="' . $s('project_root') . '" required></label>'
         . '<label><span>Repository URL — https://… for token auth, git@host:org/repo.git for SSH. Empty = keep existing origin.</span>'
         . '<input type="text" name="repo_url" value="' . $s('repo_url') . '" placeholder="https://github.com/org/repo.git"></label>'
@@ -2799,25 +3220,25 @@ function page_settings(): void
         . ($hasTok ? '<label class="chk"><input type="checkbox" name="clear_token" value="1"><span>Remove stored token</span></label>' : '')
         . '<label><span>SSH key (manage under SSH keys)</span><select name="ssh_key">' . $keyOpts . '</select></label>'
         . '</div>'
-        . '<div class="card"><h2>Sync behaviour</h2>'
+        . '<div class="card"><h2>' . icon('sync') . 'Sync behaviour</h2>'
         . '<label><span>Strategy</span><select name="sync_strategy"><option value="reset"' . $sel('sync_strategy', 'reset') . '>Force-sync: make tracked files identical to origin (recommended)</option>'
         . '<option value="ff"' . $sel('sync_strategy', 'ff') . '>Fast-forward only: abort if the server has diverged / local edits conflict</option></select></label>'
         . '<label class="chk"><input type="checkbox" name="git_clean" value="1"' . (setting('git_clean') === '1' ? ' checked' : '') . '><span>Also delete untracked, non-ignored files (git clean -fd). .env, ignored files and DPLY data are kept.</span></label>'
         . '<label class="chk"><input type="checkbox" name="submodules" value="1"' . (setting('submodules') === '1' ? ' checked' : '') . '><span>Update git submodules</span></label>'
-        . '<h2 style="margin-top:16px">Default post-deploy steps</h2>' . steps_checkboxes(default_steps())
-        . '<label style="margin-top:10px"><span>Custom post-deploy commands — one shell command per line, run in the project root (e.g. npm ci &amp;&amp; npm run build)</span>'
+        . '<div class="sub-h">Default post-deploy steps</div>' . steps_checkboxes(default_steps())
+        . '<label><span>Custom post-deploy commands — one shell command per line, run in the project root (e.g. npm ci &amp;&amp; npm run build)</span>'
         . '<textarea name="custom_commands" rows="4">' . $s('custom_commands') . '</textarea></label>'
         . '<label><span>Maintenance bypass secret (artisan down --secret) — optional</span><input type="text" name="maint_secret" value="' . $s('maint_secret') . '" pattern="[A-Za-z0-9_-]*"></label>'
         . '</div>'
-        . '<div class="card"><h2>Binaries &amp; limits</h2>'
+        . '<div class="card"><h2>' . icon('terminal') . 'Binaries &amp; limits</h2>'
         . '<label><span>PHP CLI binary — empty = auto (' . h(php_bin()) . ')</span><input type="text" name="php_bin" value="' . $s('php_bin') . '"></label>'
         . '<label><span>Composer — command name or path to composer.phar</span><input type="text" name="composer_bin" value="' . $s('composer_bin') . '"></label>'
         . '<label><span>Git binary</span><input type="text" name="git_bin" value="' . $s('git_bin') . '"></label>'
         . '<label><span>Per-command timeout (seconds)</span><input type="number" name="cmd_timeout" min="30" value="' . $s('cmd_timeout') . '"></label>'
         . '<label><span>Terminal allow-list for restricted users — one command prefix per line. Note: prefixes such as <code>php artisan</code> can execute application code.</span>'
         . '<textarea name="term_allow" rows="10">' . $s('term_allow') . '</textarea></label></div>'
-        . '</div><p class="row"><button class="primary" type="submit" name="op" value="save">Save settings</button>'
-        . '<button type="submit" name="op" value="test_git">Save &amp; test repository access</button></p></form>');
+        . '</div><div class="card row" style="position:sticky;bottom:12px;z-index:5"><button class="primary" type="submit" name="op" value="save">' . icon('check') . 'Save settings</button>'
+        . '<button type="submit" name="op" value="test_git">' . icon('sync') . 'Save &amp; test repository access</button><span class="small mute" style="margin-left:auto">Changes apply to the next deploy</span></div></form>');
 }
 
 function do_settings(): void
@@ -2934,12 +3355,15 @@ function page_audit(): void
     foreach ($rows as $r) {
         $cls = str_starts_with($r['action'], 'auth.fail') || str_starts_with($r['action'], 'security.block') || str_ends_with($r['action'], 'denied') ? 'err'
             : (str_starts_with($r['action'], 'deploy') ? 'ok' : '');
-        $html .= '<tr><td class="small">' . h(fmt_time((int) $r['created_at'])) . '</td><td>' . h($r['actor']) . '</td><td><code>' . h($r['ip']) . '</code></td><td>'
+        $html .= '<tr class="r"><td class="small" style="white-space:nowrap">' . ago((int) $r['created_at']) . '</td><td style="white-space:nowrap">' . h($r['actor']) . '</td><td><code>' . h($r['ip']) . '</code></td><td>'
             . badge($r['action'], $cls) . '</td><td class="small">' . h($r['detail']) . '</td></tr>';
     }
-    render('Audit log', '<h1>Audit log</h1><form method="get" class="row card"><input type="hidden" name="a" value="audit">'
-        . '<input type="text" name="q" value="' . h($q) . '" placeholder="Filter by action, user, IP or detail" style="flex:1;min-width:200px"><button type="submit">Filter</button></form>'
-        . '<div class="card tbl"><table><tr><th>When</th><th>User</th><th>IP</th><th>Action</th><th>Detail</th></tr>' . $html . '</table></div>');
+    render('Audit log', page_head('Audit log', 'Every sign-in, deployment, command and setting change — newest first (up to 500 entries).')
+        . '<form method="get" class="row" style="margin-bottom:18px"><input type="hidden" name="a" value="audit"><div class="searchbox">' . icon('search')
+        . '<input type="text" name="q" value="' . h($q) . '" data-search="#audit-rows tr.r" placeholder="Search action, user, IP or detail — Enter searches the full log" aria-label="Search audit log"></div>'
+        . '<button type="submit">Search</button>' . ($q !== '' ? '<a class="btn ghost" href="?a=audit">' . icon('x') . 'Clear</a>' : '') . '</form>'
+        . ($html !== '' ? '<div class="card tbl"><table id="audit-rows"><tr><th>When</th><th>User</th><th>IP</th><th>Action</th><th>Detail</th></tr>' . $html . '</table></div>'
+            : '<div class="card">' . empty_state('search', $q !== '' ? 'No entries match "' . $q . '".' : 'The audit log is empty.') . '</div>'));
 }
 
 function page_profile(): void
@@ -2947,29 +3371,35 @@ function page_profile(): void
     $u = current_user();
     $totp = '';
     if ($u['totp_secret']) {
-        $totp = '<p>' . badge('enabled', 'ok') . ' Two-factor authentication is on.</p><form method="post" action="?a=profile" data-confirm="Disable two-factor authentication?">' . csrf_field()
+        $totp = '<p>' . badge('enabled', 'ok') . ' &nbsp;Your account is protected by an authenticator code.</p><form method="post" action="?a=profile" data-confirm="Disable two-factor authentication?">' . csrf_field()
             . '<input type="hidden" name="op" value="totp_disable"><label><span>Current password</span><input type="password" name="password" required autocomplete="current-password"></label>'
             . '<button class="danger" type="submit">Disable 2FA</button></form>';
     } elseif (!empty($_SESSION['totp_pending'])) {
         $sec = $_SESSION['totp_pending'];
         $uri = 'otpauth://totp/' . rawurlencode('DPLY:' . $u['username']) . '?secret=' . $sec . '&issuer=DPLY&algorithm=SHA1&digits=6&period=30';
         $totp = '<p>Add this secret to your authenticator app (Google Authenticator, 1Password, Aegis…), then enter the current code.</p>'
-            . '<p>Secret: <code>' . h(trim(chunk_split($sec, 4, ' '))) . '</code></p><p class="small mute break">URI: <code>' . h($uri) . '</code></p>'
+            . '<label><span>Secret key</span><pre class="small" style="font-size:15px;letter-spacing:.08em">' . h(trim(chunk_split($sec, 4, ' '))) . '</pre></label>'
+            . '<details style="margin-bottom:16px"><summary class="small mute" style="cursor:pointer">Show otpauth:// URI</summary><pre class="small break" style="margin-top:8px">' . h($uri) . '</pre></details>'
             . '<form method="post" action="?a=profile">' . csrf_field() . '<input type="hidden" name="op" value="totp_enable">'
-            . '<label><span>6-digit code</span><input type="text" name="code" inputmode="numeric" required autocomplete="one-time-code"></label>'
+            . '<label><span>6-digit code</span><input type="text" name="code" class="otp" inputmode="numeric" maxlength="7" placeholder="000000" required autocomplete="one-time-code"></label>'
             . '<button class="primary" type="submit">Enable 2FA</button></form>';
     } else {
-        $totp = '<p class="mute">Protect your account with a time-based one-time code.</p><form method="post" action="?a=profile">' . csrf_field()
-            . '<input type="hidden" name="op" value="totp_start"><button type="submit">Set up 2FA</button></form>';
+        $totp = '<p>' . badge('off', 'warn') . ' &nbsp;<span class="mute">Add a second step to sign-in with a time-based one-time code.</span></p><form method="post" action="?a=profile">' . csrf_field()
+            . '<input type="hidden" name="op" value="totp_start"><button class="primary" type="submit">' . icon('lock') . 'Set up 2FA</button></form>';
     }
-    render('Profile', '<h1>Profile — ' . h($u['username']) . '</h1><div class="grid">'
-        . '<form method="post" action="?a=profile" class="card">' . csrf_field() . '<h2>Change password</h2><input type="hidden" name="op" value="password">'
+    $permRows = '';
+    foreach ($u['perm_list'] as $p) {
+        $permRows .= '<li><span class="dot ok"></span><span class="who"><b>' . h($p) . '</b> <span class="mute small">' . h(DPLY_PERMS[$p] ?? '') . '</span></span></li>';
+    }
+    render('Profile', page_head('<span class="row" style="gap:14px">' . avatar($u['username']) . h($u['username']) . '</span>', 'Manage your password, two-factor authentication and see what you can access.')
+        . '<div class="grid">'
+        . '<form method="post" action="?a=profile" class="card">' . csrf_field() . '<h2>' . icon('lock') . 'Change password</h2><input type="hidden" name="op" value="password">'
         . '<label><span>Current password</span><input type="password" name="current" required autocomplete="current-password"></label>'
         . '<label><span>New password (min 12)</span><input type="password" name="password" required minlength="12" autocomplete="new-password"></label>'
         . '<label><span>Repeat new password</span><input type="password" name="password2" required minlength="12" autocomplete="new-password"></label>'
-        . '<button class="primary" type="submit">Change password</button></form>'
-        . '<div class="card"><h2>Two-factor authentication</h2>' . $totp . '</div>'
-        . '<div class="card"><h2>Your permissions</h2><p>' . implode(' ', array_map(fn($p) => badge($p), $u['perm_list'])) . '</p></div></div>');
+        . '<button class="primary" type="submit">' . icon('check') . 'Change password</button></form>'
+        . '<div class="stack"><div class="card"><h2>' . icon('security') . 'Two-factor authentication</h2>' . $totp . '</div>'
+        . '<div class="card"><h2>' . icon('keys') . 'Your permissions</h2>' . ($permRows ? '<ul class="deps">' . $permRows . '</ul>' : empty_state('lock', 'No permissions assigned.')) . '</div></div></div>');
 }
 
 function do_profile(): void

@@ -16,8 +16,8 @@ function page_settings(): void
     foreach ($keys as $k) {
         $keyOpts .= '<option value="' . h($k) . '"' . (setting('ssh_key') === $k ? ' selected' : '') . '>' . h($k) . '</option>';
     }
-    render('Settings', '<h1>Settings</h1><form method="post" action="?a=settings">' . csrf_field() . '<div class="grid">'
-        . '<div class="card"><h2>Repository</h2>'
+    render('Settings', page_head('Settings', 'Where the code comes from, how it is synced, and which tools run it.') . '<form method="post" action="?a=settings">' . csrf_field() . '<div class="grid">'
+        . '<div class="card"><h2>' . icon('branch') . 'Repository</h2>'
         . '<label><span>Project root (the Laravel app to deploy)</span><input type="text" name="project_root" value="' . $s('project_root') . '" required></label>'
         . '<label><span>Repository URL — https://… for token auth, git@host:org/repo.git for SSH. Empty = keep existing origin.</span>'
         . '<input type="text" name="repo_url" value="' . $s('repo_url') . '" placeholder="https://github.com/org/repo.git"></label>'
@@ -29,25 +29,25 @@ function page_settings(): void
         . ($hasTok ? '<label class="chk"><input type="checkbox" name="clear_token" value="1"><span>Remove stored token</span></label>' : '')
         . '<label><span>SSH key (manage under SSH keys)</span><select name="ssh_key">' . $keyOpts . '</select></label>'
         . '</div>'
-        . '<div class="card"><h2>Sync behaviour</h2>'
+        . '<div class="card"><h2>' . icon('sync') . 'Sync behaviour</h2>'
         . '<label><span>Strategy</span><select name="sync_strategy"><option value="reset"' . $sel('sync_strategy', 'reset') . '>Force-sync: make tracked files identical to origin (recommended)</option>'
         . '<option value="ff"' . $sel('sync_strategy', 'ff') . '>Fast-forward only: abort if the server has diverged / local edits conflict</option></select></label>'
         . '<label class="chk"><input type="checkbox" name="git_clean" value="1"' . (setting('git_clean') === '1' ? ' checked' : '') . '><span>Also delete untracked, non-ignored files (git clean -fd). .env, ignored files and DPLY data are kept.</span></label>'
         . '<label class="chk"><input type="checkbox" name="submodules" value="1"' . (setting('submodules') === '1' ? ' checked' : '') . '><span>Update git submodules</span></label>'
-        . '<h2 style="margin-top:16px">Default post-deploy steps</h2>' . steps_checkboxes(default_steps())
-        . '<label style="margin-top:10px"><span>Custom post-deploy commands — one shell command per line, run in the project root (e.g. npm ci &amp;&amp; npm run build)</span>'
+        . '<div class="sub-h">Default post-deploy steps</div>' . steps_checkboxes(default_steps())
+        . '<label><span>Custom post-deploy commands — one shell command per line, run in the project root (e.g. npm ci &amp;&amp; npm run build)</span>'
         . '<textarea name="custom_commands" rows="4">' . $s('custom_commands') . '</textarea></label>'
         . '<label><span>Maintenance bypass secret (artisan down --secret) — optional</span><input type="text" name="maint_secret" value="' . $s('maint_secret') . '" pattern="[A-Za-z0-9_-]*"></label>'
         . '</div>'
-        . '<div class="card"><h2>Binaries &amp; limits</h2>'
+        . '<div class="card"><h2>' . icon('terminal') . 'Binaries &amp; limits</h2>'
         . '<label><span>PHP CLI binary — empty = auto (' . h(php_bin()) . ')</span><input type="text" name="php_bin" value="' . $s('php_bin') . '"></label>'
         . '<label><span>Composer — command name or path to composer.phar</span><input type="text" name="composer_bin" value="' . $s('composer_bin') . '"></label>'
         . '<label><span>Git binary</span><input type="text" name="git_bin" value="' . $s('git_bin') . '"></label>'
         . '<label><span>Per-command timeout (seconds)</span><input type="number" name="cmd_timeout" min="30" value="' . $s('cmd_timeout') . '"></label>'
         . '<label><span>Terminal allow-list for restricted users — one command prefix per line. Note: prefixes such as <code>php artisan</code> can execute application code.</span>'
         . '<textarea name="term_allow" rows="10">' . $s('term_allow') . '</textarea></label></div>'
-        . '</div><p class="row"><button class="primary" type="submit" name="op" value="save">Save settings</button>'
-        . '<button type="submit" name="op" value="test_git">Save &amp; test repository access</button></p></form>');
+        . '</div><div class="card row" style="position:sticky;bottom:12px;z-index:5"><button class="primary" type="submit" name="op" value="save">' . icon('check') . 'Save settings</button>'
+        . '<button type="submit" name="op" value="test_git">' . icon('sync') . 'Save &amp; test repository access</button><span class="small mute" style="margin-left:auto">Changes apply to the next deploy</span></div></form>');
 }
 
 function do_settings(): void

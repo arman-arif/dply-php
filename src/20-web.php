@@ -22,7 +22,7 @@ function web_main(): void
     send_security_headers();
     if (!setup_done()) {
         http_response_code(503);
-        render_bare('Setup required', '<div class="card"><h1>Setup required</h1><p>Initial setup is done on the server '
+        render_bare('Setup required', '<div class="card"><div class="key-ic on" style="margin-bottom:16px">' . icon('settings') . '</div><h1>Setup required</h1><p class="lead mute">Initial setup is done on the server '
             . 'command line so nobody can claim this console over the web. Run (as the PHP user):</p>'
             . '<pre>sudo -u ' . h(proc_user()) . ' php ' . h(DPLY_DIR) . '/index.php setup</pre></div>');
         return;
@@ -30,7 +30,7 @@ function web_main(): void
     $ip = client_ip();
     if (!ip_allowed($ip)) {
         http_response_code(403);
-        render_bare('Forbidden', '<div class="card"><h1>403 — Forbidden</h1><p>Your address is not allowed.</p></div>');
+        render_bare('Forbidden', '<div class="card"><div class="key-ic" style="margin-bottom:16px;color:var(--err)">' . icon('x') . '</div><h1>Access denied</h1><p class="mute">Your IP address is not on this console\'s allow-list.</p></div>');
         return;
     }
     if ($until = blocked_until($ip)) {
@@ -76,7 +76,7 @@ function blocked_response(int $until): void
 {
     http_response_code(403);
     header('Retry-After: ' . max(1, $until - time()));
-    render_bare('Blocked', '<div class="card"><h1>Access temporarily blocked</h1><p>Too many failed authentication attempts '
+    render_bare('Blocked', '<div class="card"><div class="key-ic" style="margin-bottom:16px;color:var(--err)">' . icon('lock') . '</div><h1>Temporarily blocked</h1><p class="mute">Too many failed authentication attempts '
         . 'from your address. Try again after ' . h(date('Y-m-d H:i:s T', $until)) . '.</p></div>');
 }
 
@@ -112,7 +112,7 @@ function http_auth_gate(string $ip): void
     }
     header('WWW-Authenticate: Basic realm="DPLY", charset="UTF-8"');
     http_response_code(401);
-    render_bare('Authentication required', '<div class="card"><h1>401 — Authentication required</h1></div>');
+    render_bare('Authentication required', '<div class="card"><div class="key-ic" style="margin-bottom:16px">' . icon('lock') . '</div><h1>Authentication required</h1><p class="mute">Reload the page and enter the HTTP credentials.</p></div>');
     exit;
 }
 
@@ -293,7 +293,7 @@ function dispatch(): void
     }
     if (!isset($routes[$a])) {
         http_response_code(404);
-        render('Not found', '<div class="card"><h1>404 — Not found</h1></div>');
+        render('Not found', '<div class="card">' . empty_state('search', 'This page does not exist.') . '<p style="text-align:center"><a class="btn" href="?a=dashboard">' . icon('back') . 'Back to dashboard</a></p></div>');
         return;
     }
     [$perm, $sudo] = $routes[$a];
@@ -303,8 +303,8 @@ function dispatch(): void
             json_out(['error' => 'Permission denied.'], 403);
         }
         http_response_code(403);
-        render('Forbidden', '<div class="card"><h1>403 — Permission denied</h1><p>Your account lacks the <code>'
-            . h($perm) . '</code> permission.</p></div>');
+        render('Forbidden', page_head('Permission denied') . '<div class="flash err">Your account lacks the <code>'
+            . h($perm) . '</code> permission. Ask an administrator if you need access.</div>');
         return;
     }
     if ($sudo && !sudo_fresh()) {
@@ -317,7 +317,7 @@ function dispatch(): void
     $fn = ($post ? 'do_' : 'page_') . $a;
     if (!function_exists($fn)) {
         http_response_code(405);
-        render('Method not allowed', '<div class="card"><h1>405 — Method not allowed</h1></div>');
+        render('Method not allowed', page_head('Method not allowed') . '<div class="card">' . empty_state('alert', 'This action cannot be performed this way.') . '</div>');
         return;
     }
     $fn();

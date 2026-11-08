@@ -32,13 +32,14 @@ inp.addEventListener('keydown',function(e){
 });
 document.getElementById('tbox').addEventListener('click',function(){if(!window.getSelection().toString())inp.focus();});inp.focus();})();
 JS;
-    $allow = $full ? '' : '<details class="card"><summary>Allowed commands (restricted mode)</summary><pre class="small">' . h(implode("\n", lines(setting('term_allow')))) . '</pre></details>';
-    render('Terminal', '<h1>Terminal ' . ($full ? badge('unrestricted shell', 'warn') : badge('restricted', 'ok')) . '</h1>'
-        . '<p class="mute small">Non-interactive: each command runs to completion (timeout 5 min) in the shown directory. '
-        . 'git commands automatically use the configured token / SSH key. <code>cd</code> is remembered; ↑/↓ history; <code>clear</code> or Ctrl+L.'
-        . ($full ? ' The active SSH key path is in <code>$DPLY_SSH_KEY</code>.' : ' No shell: pipes, redirects and variables are not interpreted; <code>..</code> is not allowed.') . '</p>'
-        . '<div class="term" id="tbox"><div class="term-out" id="tout"></div><div class="term-in"><span class="cwd" id="tcwd">' . h($cwd) . '</span><span>$</span>'
+    $allow = $full ? '' : '<details class="card"><summary>Allowed commands in restricted mode</summary><pre class="small">' . h(implode("\n", lines(setting('term_allow')))) . '</pre></details>';
+    render('Terminal', page_head('Terminal ' . ($full ? badge('unrestricted shell', 'warn') : badge('restricted', 'ok')),
+        'Non-interactive: each command runs to completion (timeout 5 min). git automatically uses the configured token / SSH key.'
+        . ($full ? ' The active SSH key path is in $DPLY_SSH_KEY.' : ' No shell: pipes, redirects and variables are not interpreted; ".." is not allowed.'))
+        . '<div class="term" id="tbox"><div class="term-bar"><span class="term-dots"><i></i><i></i><i></i></span><span class="t">' . h(proc_user()) . '@' . h((string) (gethostname() ?: 'server'))
+        . '</span><span>' . ($full ? 'sh' : 'restricted') . '</span></div><div class="term-out" id="tout" aria-live="polite"></div><div class="term-in"><span class="cwd" id="tcwd" title="' . h($cwd) . '">' . h($cwd) . '</span><span style="color:#5e697a">$</span>'
         . '<input id="tin" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Command"></div></div>'
+        . '<div class="tips"><span><kbd>↑</kbd><kbd>↓</kbd> history</span><span><kbd>Ctrl</kbd>+<kbd>L</kbd> or <code>clear</code> to clear</span><span><code>cd</code> is remembered</span></div>'
         . '<input type="hidden" id="tcsrf" value="' . h(csrf_token()) . '">' . $allow
         . '<script nonce="' . csp_nonce() . '">' . $js . '</script>');
 }

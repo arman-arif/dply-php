@@ -47,7 +47,9 @@ function page_dashboard(): void
         $info .= '<tr><td class="k">' . h($k) . '</td><td>' . $v . '</td></tr>';
     }
 
-    $deps = db()->query('SELECT * FROM deployments ORDER BY id DESC LIMIT 6')->fetchAll();
+    $st = db()->prepare('SELECT * FROM deployments WHERE project_id = ? ORDER BY id DESC LIMIT 6');
+    $st->execute([current_project_id()]);
+    $deps = $st->fetchAll();
     $last = $deps[0] ?? null;
     $canDeploy = can('deploy');
     $dHtml = '';
@@ -88,8 +90,26 @@ function page_dashboard(): void
     }
 
     $u = current_user();
-    render('Dashboard', page_head('Welcome back, ' . h($u['username']), 'Health of ' . basename($root) . ' at a glance.')
-        . $warnHtml . $stats
+    $proj = current_project();
+    $others = '';
+    $plist = accessible_projects($u);
+    if (count($plist) > 1) {
+        foreach ($plist as $p) {
+            $last = project_last_deploy($p['id']);
+            $pRoot = rtrim(project_setting($p['id'], 'project_root'), '/');
+            $pDown = is_file("$pRoot/storage/framework/down");
+            $tone = !$last ? '' : ($last['status'] === 'success' ? 'ok' : ($last['status'] === 'failed' ? 'err' : 'warn'));
+            $on = $p['id'] === $proj['id'];
+            $others .= '<li><span class="dot ' . ($pDown ? 'err' : $tone) . '"></span><span class="who"><b>' . h($p['name']) . '</b> <span class="mute small">'
+                . h(project_setting($p['id'], 'branch')) . '</span>' . ($pDown ? ' ' . badge('maintenance', 'err') : '') . '</span>'
+                . ($last ? deploy_status_badge($last['status']) . '<span class="when">' . ago((int) $last['started_at']) . '</span>' : '<span class="when">never deployed</span>')
+                . ($on ? badge('current', 'ok') : project_switch_button($p['id'], 'dashboard', 'Open')) . '</li>';
+        }
+        $others = '<div class="card"><div class="card-h"><h2>' . icon('folder') . 'All projects <span class="badge">' . count($plist) . '</span></h2>'
+            . (can('admin') ? '<a class="small" href="?a=projects">Manage</a>' : '') . '</div><ul class="deps">' . $others . '</ul></div>';
+    }
+    render('Dashboard', page_head(h($proj['name']), 'Welcome back, ' . $u['username'] . ' — here is how ' . $proj['name'] . ' is doing.')
+        . $warnHtml . $stats . $others
         . '<div class="' . ($qa ? 'grid-main' : '') . '"><div class="stack"><div class="card"><h2>' . icon('dashboard') . 'Project</h2><div class="tbl"><table>' . $info . '</table></div></div>'
         . '<div class="card"><div class="card-h"><h2>' . icon('clock') . 'Recent deployments</h2>'
         . ($canDeploy && $deps ? '<a class="small" href="?a=deploy">View all</a>' : '') . '</div>'

@@ -9,7 +9,7 @@ declare(strict_types=1);
 function page_terminal(): void
 {
     $full = can('terminal_full');
-    $cwd = $_SESSION['term_cwd'] ?? project_root();
+    $cwd = $_SESSION['term_cwd_' . current_project_id()] ?? project_root();
     $js = <<<'JS'
 (function(){var out=document.getElementById('tout'),inp=document.getElementById('tin'),cwd=document.getElementById('tcwd'),
 csrf=document.getElementById('tcsrf').value,hist=[],hi=0;
@@ -22,7 +22,7 @@ inp.addEventListener('keydown',function(e){
  var cmd=inp.value;if(!cmd.trim())return;hist.push(cmd);hi=hist.length;inp.value='';
  if(cmd.trim()==='clear'){out.textContent='';return;}
  add(cwd.textContent+' $ '+cmd+'\n','t-cmd');inp.disabled=true;
- fetch('?a=term_exec',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json','X-CSRF-Token':csrf},body:JSON.stringify({cmd:cmd})})
+ fetch('?a=term_exec',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json','X-CSRF-Token':csrf,'X-DPLY-Project':document.getElementById('tproj').value},body:JSON.stringify({cmd:cmd})})
  .then(function(r){return r.json();}).then(function(j){
    if(j.reauth){location.href='?a=reauth&return='+encodeURIComponent('?a=terminal');return;}
    if(j.output)add(j.output);if(j.error)add(j.error+'\n','t-err');
@@ -40,7 +40,7 @@ JS;
         . '</span><span>' . ($full ? 'sh' : 'restricted') . '</span></div><div class="term-out" id="tout" aria-live="polite"></div><div class="term-in"><span class="cwd" id="tcwd" title="' . h($cwd) . '">' . h($cwd) . '</span><span style="color:#5e697a">$</span>'
         . '<input id="tin" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Command"></div></div>'
         . '<div class="tips"><span><kbd>↑</kbd><kbd>↓</kbd> history</span><span><kbd>Ctrl</kbd>+<kbd>L</kbd> or <code>clear</code> to clear</span><span><code>cd</code> is remembered</span></div>'
-        . '<input type="hidden" id="tcsrf" value="' . h(csrf_token()) . '">' . $allow
+        . '<input type="hidden" id="tcsrf" value="' . h(csrf_token()) . '"><input type="hidden" id="tproj" value="' . current_project_id() . '">' . $allow
         . '<script nonce="' . csp_nonce() . '">' . $js . '</script>');
 }
 
@@ -68,7 +68,7 @@ function do_term_exec(): void
     }
     $full = can('terminal_full');
     $root = project_root();
-    $cwd = (string) ($_SESSION['term_cwd'] ?? $root);
+    $cwd = (string) ($_SESSION['term_cwd_' . current_project_id()] ?? $root);
     if (!is_dir($cwd) || (!$full && !path_within($cwd, $root))) {
         $cwd = $root;
     }
@@ -82,7 +82,7 @@ function do_term_exec(): void
         if (!$full && !path_within($new, $root)) {
             json_out(['error' => 'Restricted mode: cannot leave the project root.', 'exit' => 1, 'cwd' => $cwd]);
         }
-        $_SESSION['term_cwd'] = $new;
+        $_SESSION['term_cwd_' . current_project_id()] = $new;
         json_out(['output' => '', 'exit' => 0, 'cwd' => $new]);
     }
 

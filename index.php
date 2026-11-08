@@ -2,7 +2,7 @@
 // GENERATED FILE — do not edit. Edit app/tool/dply/src/*.php and run: php app/tool/dply/build.php
 /**
  * ============================================================================
- *  DPLY — single-file deployment console for this Laravel application
+ *  DPLY — single-file deployment console for one or more Laravel applications
  * ============================================================================
  *  Purpose: fetch/pull updates from git into the project, then run the
  *  post-deployment artisan steps. Also: artisan runner, web terminal,
@@ -12,6 +12,12 @@
  *  FIRST RUN — on the server, as the user PHP runs as (e.g. www-data):
  *      sudo -u www-data php app/tool/dply/index.php setup
  *  Other CLI commands:   php app/tool/dply/index.php help
+ *
+ *  PROJECTS: one console can deploy several apps. Add them under Projects in
+ *  the web UI or with `project:add <slug> --root=/path`; pick one in the
+ *  sidebar, or pass --project=<slug> on the CLI (e.g. deploy --project=shop).
+ *  Repository, auth, steps and deploy history are per project; users,
+ *  security, binaries and the SSH key pool are shared.
  *
  *  Security layers, in order:
  *      optional IP allow-list → automatic IP blocking (escalating) →
@@ -29,7 +35,7 @@
  */
 declare(strict_types=1);
 
-define('DPLY_VERSION', '1.0.0');
+define('DPLY_VERSION', '1.1.0');
 define('DPLY_DIR', __DIR__);
 define('DPLY_DATA', rtrim((string) (getenv('DPLY_DATA_DIR') ?: __DIR__ . '/data'), '/'));
 define('DPLY_DB', DPLY_DATA . '/sqlite.db');
@@ -56,7 +62,7 @@ const DPLY_STEPS = [
     'view_cache'     => 'artisan view:cache',
     'event_cache'    => 'artisan event:cache',
     'queue_restart'  => 'artisan queue:restart',
-    'custom'         => 'Custom post-deploy commands (Settings)',
+    'custom'         => 'Custom post-deploy commands (project settings)',
     'opcache'        => 'Reset PHP OPcache',
     'up'             => 'Maintenance mode OFF (artisan up)',
 ];
@@ -153,6 +159,7 @@ function db(): PDO
         );
         CREATE INDEX IF NOT EXISTS audit_time ON audit (created_at);
         SQL);
+    db_migrate($pdo);
     return $pdo;
 }
 
@@ -206,13 +213,26 @@ function settings_all(): array
     return $cache;
 }
 
+/** Global setting, or — for keys in DPLY_PROJECT_KEYS — the current project's value. */
 function setting(string $k): string
 {
+    if (is_project_key($k)) {
+        $p = current_project();
+        return $p ? project_setting($p['id'], $k) : (string) (setting_defaults()[$k] ?? '');
+    }
     return (string) (settings_all()[$k] ?? '');
 }
 
 function set_setting(string $k, string $v): void
 {
+    if (is_project_key($k)) {
+        $p = current_project();
+        if (!$p) {
+            throw new RuntimeException("No current project to store '$k' in.");
+        }
+        set_project_setting($p['id'], $k, $v);
+        return;
+    }
     db()->prepare('INSERT INTO settings (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v')->execute([$k, $v]);
     $GLOBALS['__dply_settings_dirty'] = true;
 }
@@ -301,8 +321,275 @@ function audit(string $action, string $detail = '', ?string $actor = null, ?stri
         $u = PHP_SAPI === 'cli' ? null : current_user();
         $actor = $u['username'] ?? (PHP_SAPI === 'cli' ? 'cli' : '-');
     }
-    db()->prepare('INSERT INTO audit (actor, ip, action, detail, created_at) VALUES (?, ?, ?, ?, ?)')
-        ->execute([$actor, $ip ?? (PHP_SAPI === 'cli' ? 'cli' : client_ip()), $action, substr($detail, 0, 2000), time()]);
+    db()->prepare('INSERT INTO audit (actor, ip, action, detail, created_at, project_id) VALUES (?, ?, ?, ?, ?, ?)')
+        ->execute([$actor, $ip ?? (PHP_SAPI === 'cli' ? 'cli' : client_ip()), $action, substr($detail, 0, 2000), time(), audit_project_id($action)]);
+}
+
+/** Only actions that act on a project are tagged with it; global ones (users, security, auth) are not. */
+function audit_project_id(string $action): ?int
+{
+    return preg_match('/^(deploy|artisan|terminal|env|settings|project)\.|^keys\.activate$/', $action) ? resolved_project_id() : null;
+}
+
+// ---- src/12-projects.php ---------------------------------------------
+
+// ============================================================================
+//  Projects — several apps managed from one console
+// ============================================================================
+//  Settings listed in DPLY_PROJECT_KEYS are stored per project (table
+//  project_settings); setting()/set_setting() route them to the *current*
+//  project transparently, so the rest of the code keeps calling setting('branch').
+//  Everything else (users, security, binaries, SSH key pool) stays global.
+
+const DPLY_PROJECT_KEYS = [
+    'project_root', 'repo_url', 'branch', 'git_auth', 'git_token_user', 'git_token', 'ssh_key',
+    'sync_strategy', 'git_clean', 'submodules', 'post_steps', 'custom_commands', 'maint_secret', 'php_bin',
+];
+
+function is_project_key(string $k): bool
+{
+    return in_array($k, DPLY_PROJECT_KEYS, true);
+}
+
+/** Schema upgrades for multi-project support. Idempotent; runs on every connection. */
+function db_migrate(PDO $pdo): void
+{
+    $pdo->exec(<<<SQL
+        CREATE TABLE IF NOT EXISTS projects (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            slug TEXT NOT NULL UNIQUE COLLATE NOCASE,
+            name TEXT NOT NULL,
+            created_at INTEGER NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS project_settings (
+            project_id INTEGER NOT NULL REFERENCES projects (id) ON DELETE CASCADE,
+            k TEXT NOT NULL, v TEXT NOT NULL,
+            PRIMARY KEY (project_id, k)
+        );
+        SQL);
+    $cols = fn(string $t) => array_column($pdo->query("PRAGMA table_info($t)")->fetchAll(), 'name');
+    foreach ([['deployments', 'project_id', 'INTEGER'], ['audit', 'project_id', 'INTEGER'], ['users', 'projects', "TEXT NOT NULL DEFAULT ''"]] as [$t, $c, $type]) {
+        if (!in_array($c, $cols($t), true)) {
+            try {
+                $pdo->exec("ALTER TABLE $t ADD COLUMN $c $type");
+            } catch (PDOException $e) {
+                // A concurrent request added it first.
+            }
+        }
+    }
+    $pdo->exec('CREATE INDEX IF NOT EXISTS deployments_project ON deployments (project_id, id)');
+
+    if ((int) $pdo->query('SELECT COUNT(*) FROM projects')->fetchColumn() > 0) {
+        return;
+    }
+    // First run after the upgrade (or a fresh install): turn the single-project
+    // configuration into project #1, keeping its history and .env backups.
+    $pdo->exec('BEGIN IMMEDIATE');
+    try {
+        if ((int) $pdo->query('SELECT COUNT(*) FROM projects')->fetchColumn() === 0) {
+            $legacy = [];
+            foreach ($pdo->query('SELECT k, v FROM settings') as $r) {
+                if (is_project_key($r['k'])) {
+                    $legacy[$r['k']] = $r['v'];
+                }
+            }
+            $root = rtrim($legacy['project_root'] ?? setting_defaults()['project_root'], '/');
+            $name = basename($root) ?: 'Default';
+            $pdo->prepare('INSERT INTO projects (slug, name, created_at) VALUES (?, ?, ?)')->execute([slugify($name) ?: 'default', $name, time()]);
+            $pid = (int) $pdo->lastInsertId();
+            $legacy['project_root'] = $root;
+            $ins = $pdo->prepare('INSERT INTO project_settings (project_id, k, v) VALUES (?, ?, ?)');
+            foreach ($legacy as $k => $v) {
+                $ins->execute([$pid, $k, $v]);
+            }
+            $pdo->prepare('UPDATE deployments SET project_id = ? WHERE project_id IS NULL')->execute([$pid]);
+            $old = glob(DPLY_DATA . '/env-backups/env-*') ?: [];
+            if ($old) {
+                $dir = DPLY_DATA . "/env-backups/p$pid";
+                if (is_dir($dir) || @mkdir($dir, 0700, true)) {
+                    foreach ($old as $f) {
+                        @rename($f, "$dir/" . basename($f));
+                    }
+                }
+            }
+        }
+        $pdo->exec('COMMIT');
+    } catch (Throwable $e) {
+        $pdo->exec('ROLLBACK');
+        throw $e;
+    }
+}
+
+function slugify(string $s): string
+{
+    return substr(trim((string) preg_replace('/[^a-z0-9]+/', '-', strtolower($s)), '-'), 0, 40);
+}
+
+function valid_slug(string $s): bool
+{
+    return (bool) preg_match('/^[a-z0-9][a-z0-9-]{0,39}$/', $s);
+}
+
+/** All projects keyed by id, sorted by name. */
+function projects_all(bool $fresh = false): array
+{
+    static $cache = null;
+    if ($cache === null || $fresh || isset($GLOBALS['__dply_projects_dirty'])) {
+        unset($GLOBALS['__dply_projects_dirty']);
+        $cache = [];
+        foreach (db()->query('SELECT * FROM projects ORDER BY name COLLATE NOCASE, id') as $p) {
+            $p['id'] = (int) $p['id'];
+            $cache[$p['id']] = $p;
+        }
+    }
+    return $cache;
+}
+
+function projects_changed(): void
+{
+    $GLOBALS['__dply_projects_dirty'] = true;
+    $GLOBALS['__dply_psettings_dirty'] = true;
+}
+
+function project_by_id(int $id): ?array
+{
+    return projects_all()[$id] ?? null;
+}
+
+/** Look a project up by slug or numeric id (CLI --project=). */
+function project_by_ref(string $ref): ?array
+{
+    foreach (projects_all() as $p) {
+        if (strcasecmp($p['slug'], $ref) === 0 || (ctype_digit($ref) && $p['id'] === (int) $ref)) {
+            return $p;
+        }
+    }
+    return null;
+}
+
+function project_settings_raw(int $pid): array
+{
+    static $cache = [];
+    if (isset($GLOBALS['__dply_psettings_dirty'])) {
+        unset($GLOBALS['__dply_psettings_dirty']);
+        $cache = [];
+    }
+    if (!isset($cache[$pid])) {
+        $st = db()->prepare('SELECT k, v FROM project_settings WHERE project_id = ?');
+        $st->execute([$pid]);
+        $cache[$pid] = [];
+        foreach ($st as $r) {
+            $cache[$pid][$r['k']] = $r['v'];
+        }
+    }
+    return $cache[$pid];
+}
+
+function project_setting(int $pid, string $k): string
+{
+    return (string) (project_settings_raw($pid)[$k] ?? setting_defaults()[$k] ?? '');
+}
+
+function set_project_setting(int $pid, string $k, string $v): void
+{
+    db()->prepare('INSERT INTO project_settings (project_id, k, v) VALUES (?, ?, ?) ON CONFLICT(project_id, k) DO UPDATE SET v = excluded.v')
+        ->execute([$pid, $k, $v]);
+    $GLOBALS['__dply_psettings_dirty'] = true;
+}
+
+/** Project ids the user may open, or null for "every project" (admins and unrestricted users). */
+function user_project_ids(?array $u): ?array
+{
+    if (!$u) {
+        return null;
+    }
+    if (in_array('admin', array_filter(explode(',', (string) $u['perms'])), true) || trim((string) ($u['projects'] ?? '')) === '') {
+        return null;
+    }
+    return array_values(array_unique(array_map('intval', array_filter(explode(',', (string) $u['projects']), 'ctype_digit'))));
+}
+
+function user_can_project(?array $u, int $pid): bool
+{
+    if (!project_by_id($pid)) {
+        return false;
+    }
+    $ids = user_project_ids($u);
+    return $ids === null || in_array($pid, $ids, true);
+}
+
+function accessible_projects(?array $u): array
+{
+    return array_filter(projects_all(), fn($p) => user_can_project($u, $p['id']));
+}
+
+/** Make $id the current project for this request (and, on the web, for the session). */
+function use_project(?int $id): void
+{
+    $GLOBALS['__dply_project'] = $id !== null ? project_by_id($id) : null;
+    if (PHP_SAPI !== 'cli' && session_status() === PHP_SESSION_ACTIVE) {
+        $_SESSION['project'] = $id;
+    }
+}
+
+/** The current project. Web: the session's choice if still allowed, else the first allowed. CLI: the first project. */
+function current_project(): ?array
+{
+    if (!array_key_exists('__dply_project', $GLOBALS)) {
+        $u = PHP_SAPI === 'cli' ? null : current_user();
+        $want = PHP_SAPI !== 'cli' && session_status() === PHP_SESSION_ACTIVE ? (int) ($_SESSION['project'] ?? 0) : 0;
+        if ($want && user_can_project($u, $want)) {
+            $GLOBALS['__dply_project'] = project_by_id($want);
+        } else {
+            $list = accessible_projects($u);
+            $first = $list ? reset($list) : null;
+            use_project($first['id'] ?? null);
+        }
+    }
+    return $GLOBALS['__dply_project'];
+}
+
+function current_project_id(): int
+{
+    return (int) (current_project()['id'] ?? 0);
+}
+
+/** The project id already chosen for this request, without triggering resolution (used by audit()). */
+function resolved_project_id(): ?int
+{
+    return isset($GLOBALS['__dply_project']['id']) ? (int) $GLOBALS['__dply_project']['id'] : null;
+}
+
+/** Another project whose root is $root, if any (two projects must not share a directory). */
+function project_using_root(string $root, int $exceptId = 0): ?array
+{
+    foreach (projects_all() as $p) {
+        if ($p['id'] !== $exceptId && rtrim(project_setting($p['id'], 'project_root'), '/') === rtrim($root, '/')) {
+            return $p;
+        }
+    }
+    return null;
+}
+
+function project_last_deploy(int $pid): ?array
+{
+    $st = db()->prepare('SELECT id, status, actor, started_at FROM deployments WHERE project_id = ? ORDER BY id DESC LIMIT 1');
+    $st->execute([$pid]);
+    return $st->fetch() ?: null;
+}
+
+function env_backup_dir(): string
+{
+    $d = DPLY_DATA . '/env-backups/p' . current_project_id();
+    if (!is_dir($d)) {
+        @mkdir($d, 0700, true);
+    }
+    return $d;
+}
+
+function deploy_lock_file(): string
+{
+    return DPLY_DATA . '/deploy-p' . current_project_id() . '.lock';
 }
 
 // ---- src/15-blocking.php ---------------------------------------------
@@ -562,7 +849,9 @@ function csrf_token(): string
 
 function csrf_field(): string
 {
-    return '<input type="hidden" name="_csrf" value="' . h(csrf_token()) . '">';
+    // _p pins the form to the project it was rendered for (see the stale-tab guard in dispatch()).
+    $pid = resolved_project_id();
+    return '<input type="hidden" name="_csrf" value="' . h(csrf_token()) . '">' . ($pid ? '<input type="hidden" name="_p" value="' . $pid . '">' : '');
 }
 
 function csrf_ok(): bool
@@ -687,6 +976,20 @@ function dispatch(): void
         return;
     }
 
+    $project = current_project();
+    // Stale-tab guard: a form rendered for project A must not act on project B after a switch in another tab.
+    $sentProject = $_POST['_p'] ?? $_SERVER['HTTP_X_DPLY_PROJECT'] ?? null;
+    if ($post && $sentProject !== null && !in_array($a, ['project_switch', 'logout', 'reauth'], true) && (int) $sentProject !== (int) ($project['id'] ?? 0)) {
+        $was = project_by_id((int) $sentProject);
+        $msg = 'This form was opened for project "' . ($was['name'] ?? '#' . (int) $sentProject) . '", but you have since switched to "'
+            . ($project['name'] ?? 'none') . '" (perhaps in another tab). Nothing was done — check the project and try again.';
+        if ($a === 'term_exec') {
+            json_out(['error' => $msg]);
+        }
+        flash('warn', $msg);
+        redirect('?a=' . $a);
+    }
+
     // action => [required permission, needs fresh password confirmation]
     $routes = [
         'dashboard'  => [null, false],
@@ -700,6 +1003,8 @@ function dispatch(): void
         'users'      => ['admin', true],
         'security'   => ['admin', true],
         'settings'   => ['admin', true],
+        'projects'   => ['admin', true],
+        'project_switch' => [null, false],
         'audit'      => ['admin', false],
         'profile'    => [null, false],
         'reauth'     => [null, false],
@@ -712,6 +1017,11 @@ function dispatch(): void
     if (!isset($routes[$a])) {
         http_response_code(404);
         render('Not found', '<div class="card">' . empty_state('search', 'This page does not exist.') . '<p style="text-align:center"><a class="btn" href="?a=dashboard">' . icon('back') . 'Back to dashboard</a></p></div>');
+        return;
+    }
+    if (!$project && !in_array($a, ['profile', 'reauth', 'logout'], true)) {
+        render('No project access', page_head('No projects available', 'You are signed in, but no project has been assigned to your account.')
+            . '<div class="card">' . empty_state('folder', 'Ask an administrator to give you access to a project.') . '</div>');
         return;
     }
     [$perm, $sudo] = $routes[$a];
@@ -739,6 +1049,22 @@ function dispatch(): void
         return;
     }
     $fn();
+}
+
+function do_project_switch(): void
+{
+    $id = (int) ($_POST['id'] ?? 0);
+    $ret = (string) ($_POST['return'] ?? 'dashboard');
+    if (!preg_match('/^[a-z_]{1,32}$/', $ret) || in_array($ret, ['deploy_log', 'project_switch', 'logout', 'term_exec', 'reauth', 'login', 'login_2fa'], true)) {
+        $ret = $ret === 'deploy_log' ? 'deploy' : 'dashboard';
+    }
+    if (!user_can_project(current_user(), $id)) {
+        flash('err', 'You do not have access to that project.');
+        redirect('?a=dashboard');
+    }
+    use_project($id);
+    audit('project.switch', project_by_id($id)['slug']);
+    redirect('?a=' . $ret);
 }
 
 // ---- src/25-auth.php -------------------------------------------------
@@ -1008,9 +1334,12 @@ function find_bin(string $name): ?string
 function php_bin(): string
 {
     $s = trim(setting('php_bin'));
-    if ($s !== '') {
-        return $s;
-    }
+    return $s !== '' ? $s : php_bin_auto();
+}
+
+/** Best-guess PHP CLI binary matching the PHP version running DPLY. */
+function php_bin_auto(): string
+{
     $c = [];
     if (PHP_BINARY !== '' && !preg_match('/fpm|cgi|apache|httpd|litespeed|lsphp|frankenphp/i', basename(PHP_BINARY))) {
         $c[] = PHP_BINARY;
@@ -1337,9 +1666,9 @@ function repo_rel_path(string $abs): ?string
  */
 function deploy_run(string $actor, array $steps, ?string $rollbackTo = null, ?callable $echo = null): array
 {
-    $lock = fopen(DPLY_DATA . '/deploy.lock', 'c');
+    $lock = fopen(deploy_lock_file(), 'c');
     if (!$lock || !flock($lock, LOCK_EX | LOCK_NB)) {
-        return ['ok' => false, 'id' => 0, 'msg' => 'Another deployment is already running.'];
+        return ['ok' => false, 'id' => 0, 'msg' => 'Another deployment of this project is already running.'];
     }
     @set_time_limit(0);
     ignore_user_abort(true);
@@ -1347,10 +1676,10 @@ function deploy_run(string $actor, array $steps, ?string $rollbackTo = null, ?ca
     $pdo = db();
     $root = project_root();
     $branch = setting('branch');
-    $pdo->prepare('INSERT INTO deployments (actor, kind, branch, status, steps, started_at, log) VALUES (?, ?, ?, ?, ?, ?, ?)')
-        ->execute([$actor, $rollbackTo ? 'rollback' : 'deploy', $branch, 'running', implode(',', $steps), time(), '']);
+    $pdo->prepare('INSERT INTO deployments (actor, kind, branch, status, steps, started_at, log, project_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+        ->execute([$actor, $rollbackTo ? 'rollback' : 'deploy', $branch, 'running', implode(',', $steps), time(), '', current_project_id()]);
     $id = (int) $pdo->lastInsertId();
-    audit($rollbackTo ? 'deploy.rollback' : 'deploy.start', "#$id " . ($rollbackTo ? "to $rollbackTo" : "branch $branch"), $actor);
+    audit($rollbackTo ? 'deploy.rollback' : 'deploy.start', "#$id " . (current_project()['slug'] ?? '') . ' ' . ($rollbackTo ? "to $rollbackTo" : "branch $branch"), $actor);
 
     $log = '';
     $L = function (?string $s) use (&$log, $echo): void {
@@ -1592,6 +1921,9 @@ function icon(string $name, string $cls = ''): string
         'plus'      => '<path d="M12 5v14M5 12h14"/>',
         'download'  => '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/>',
         'sync'      => '<path d="M21 2v6h-6M3 22v-6h6"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8M21 12a9 9 0 0 1-15 6.7L3 16"/>',
+        'folder'    => '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
+        'projects'  => '<path d="M2 9a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2z"/><path d="M6 7V5a2 2 0 0 1 2-2h4l2 2h6a2 2 0 0 1 2 2v7"/>',
+        'chevrons'  => '<path d="m7 15 5 5 5-5M7 9l5-5 5 5"/>',
         'list'      => '<path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>',
     ];
     return '<svg class="ic' . ($cls ? ' ' . $cls : '') . '" viewBox="0 0 24 24" aria-hidden="true">' . ($p[$name] ?? '') . '</svg>';
@@ -1673,6 +2005,36 @@ a{color:var(--link);text-decoration:none}a:hover{text-decoration:underline}
 main{width:100%;max-width:1240px;margin:0 auto;padding:30px 34px 56px}
 .scrim{display:none}
 
+/* ---- project switcher ---- */
+.proj{margin:2px 0 4px}
+.proj-box{position:relative;display:flex;align-items:center;gap:10px;margin:0;padding:8px 10px;border:1px solid var(--line2);border-radius:11px;background:var(--panel);cursor:pointer;transition:border-color .15s,box-shadow .15s}
+.proj-box:hover{border-color:var(--faint)}.proj-box:focus-within{border-color:var(--acc);box-shadow:0 0 0 3px var(--ring)}
+.proj-box.static{cursor:default}.proj-box>.ic{color:var(--acc)}
+.proj-t{flex:1;min-width:0;display:block}.proj-t small{display:block;font-size:10.5px;font-weight:650;text-transform:uppercase;letter-spacing:.08em;color:var(--faint);margin:0}
+.proj-t b{display:block;font-size:13.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.proj-box select,.proj-box select:hover,.proj-box select:focus{border:0;box-shadow:none;background:none;height:auto;padding:0;margin:0;font-weight:650;font-size:13.5px;color:var(--text);cursor:pointer;width:100%;
+ position:static;text-overflow:ellipsis}
+.proj-chev{width:15px;height:15px;color:var(--faint);pointer-events:none}
+.proj-add{display:grid;place-items:center;width:26px;height:26px;border-radius:7px;color:var(--mute)}.proj-add:hover{background:var(--panel2);color:var(--text)}.proj-add .ic{width:15px;height:15px}
+.topbar-proj{margin-left:auto;display:inline-flex;align-items:center;gap:6px;max-width:50%;padding:4px 10px;border-radius:99px;background:var(--acc-soft);font-size:12.5px;font-weight:600;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.topbar-proj .ic{width:14px;height:14px;color:var(--acc)}
+.pgrid{display:grid;gap:14px;grid-template-columns:repeat(auto-fill,minmax(280px,1fr))}
+.pcard{display:flex;flex-direction:column;gap:12px;padding:18px;border:1px solid var(--line);border-radius:var(--r);background:var(--panel);box-shadow:var(--shadow);min-width:0}
+.pcard.on{border-color:color-mix(in srgb,var(--acc) 50%,transparent);box-shadow:0 0 0 3px var(--acc-soft),var(--shadow)}
+.pcard-h{display:flex;align-items:center;gap:12px;min-width:0}.pcard-h .n{flex:1;min-width:0}
+.pcard-h b{display:block;font-size:15px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.pcard-h small{display:block;color:var(--faint);font-size:12px;font-family:var(--mono)}
+.pmeta{display:flex;flex-wrap:wrap;gap:6px 14px;color:var(--mute);font-size:12.5px}.pmeta span{display:inline-flex;align-items:center;gap:5px;min-width:0}
+.pmeta .ic{width:14px;height:14px;color:var(--faint)}
+.pcard .row{margin-top:auto}
+.pmore{position:relative}.pmore summary{list-style:none}.pmore summary::-webkit-details-marker{display:none}
+.pmore-b{position:absolute;right:0;top:calc(100% + 6px);z-index:20;width:min(300px,80vw);padding:16px;background:var(--panel);border:1px solid var(--line2);border-radius:12px;box-shadow:0 20px 50px -18px rgba(0,0,0,.45)}
+.pmore-b label{margin-bottom:12px}.pmore-b .divider{margin:14px 0}
+.sub-h{display:flex;align-items:center;gap:7px}.sub-h .ic{width:15px;height:15px}
+.hint .ic.small,.hint .ic{width:14px;height:14px;vertical-align:-2px}
+.access{border:1px solid var(--line);border-radius:12px;padding:12px;margin-bottom:16px}
+.access .chks{margin:10px 0 0}.access .chk{margin:0}
+.access:has(input[value=all]:checked) .chks{opacity:.45;pointer-events:none}
+
 /* ---- typography ---- */
 .phead{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:14px 20px;margin-bottom:24px}
 .phead-t{min-width:0}
@@ -1726,7 +2088,7 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--acc);box
 input[readonly],textarea[readonly]{background:var(--code);color:var(--mute)}
 select{appearance:none;-webkit-appearance:none;padding-right:36px;background-image:{$chev};background-repeat:no-repeat;background-position:right 11px center;background-size:16px;cursor:pointer}
 textarea{font:12.5px/1.6 var(--mono);resize:vertical;min-height:80px}
-input[type=checkbox]{width:16px;height:16px;margin:2px 0 0;flex:none;accent-color:var(--acc);cursor:pointer}
+input[type=checkbox],input[type=radio]{width:16px;height:16px;margin:2px 0 0;flex:none;accent-color:var(--acc);cursor:pointer}
 .chk{display:flex;gap:11px;align-items:flex-start;margin:0 0 6px;padding:9px 12px;border:1px solid var(--line);border-radius:10px;cursor:pointer;transition:background .15s,border-color .15s;line-height:1.45}
 .chk:hover{background:var(--panel2)}.chk:has(input:checked){border-color:color-mix(in srgb,var(--acc) 45%,transparent);background:var(--acc-soft)}
 .chk:has(input:disabled){opacity:.65;cursor:not-allowed}
@@ -1899,7 +2261,7 @@ function nav_items(): array
         'Overview'       => ['dashboard' => ['Dashboard', null]],
         'Operations'     => ['deploy' => ['Deploy', 'deploy'], 'artisan' => ['Artisan', 'artisan'], 'terminal' => ['Terminal', 'terminal']],
         'Configuration'  => ['env' => ['Environment', 'env'], 'keys' => ['SSH keys', 'keys']],
-        'Administration' => ['users' => ['Users', 'admin'], 'security' => ['Security', 'admin'], 'settings' => ['Settings', 'admin'], 'audit' => ['Audit log', 'admin']],
+        'Administration' => ['projects' => ['Projects', 'admin'], 'users' => ['Users', 'admin'], 'security' => ['Security', 'admin'], 'settings' => ['Settings', 'admin'], 'audit' => ['Audit log', 'admin']],
     ];
 }
 
@@ -1928,14 +2290,31 @@ function layout_head(string $title, bool $nav = true): string
             }
         }
         $role = in_array('admin', $u['perm_list'] ?? [], true) ? 'Administrator' : 'Member';
+        $proj = current_project();
+        $plist = accessible_projects($u);
+        $switch = '';
+        if ($proj && count($plist) > 1) {
+            $opts = '';
+            foreach ($plist as $p) {
+                $opts .= '<option value="' . $p['id'] . '"' . ($p['id'] === $proj['id'] ? ' selected' : '') . '>' . h($p['name']) . '</option>';
+            }
+            $switch = '<form method="post" action="?a=project_switch" class="proj">' . csrf_field() . '<input type="hidden" name="return" value="' . h($cur) . '">'
+                . '<label class="proj-box" title="Switch project">' . icon('folder') . '<span class="proj-t"><small>Project</small>'
+                . '<select name="id" data-autosubmit aria-label="Switch project">' . $opts . '</select></span>' . icon('chevrons', 'proj-chev') . '</label>'
+                . '<noscript><button class="sm" type="submit" style="width:100%;margin-top:6px">Switch</button></noscript></form>';
+        } elseif ($proj) {
+            $switch = '<div class="proj"><div class="proj-box static">' . icon('folder') . '<span class="proj-t"><small>Project</small><b>' . h($proj['name']) . '</b></span>'
+                . (can('admin') ? '<a class="proj-add" href="?a=projects#new-project" title="Add another project">' . icon('plus') . '</a>' : '') . '</div></div>';
+        }
         $shell = '<div class="app"><aside class="side" id="side"><a class="brand" href="?a=dashboard">' . $logo
-            . '<span><b>DPLY</b><small>Deploy console</small></span></a><nav aria-label="Main">' . $navHtml . '</nav>'
+            . '<span><b>DPLY</b><small>Deploy console</small></span></a>' . $switch . '<nav aria-label="Main">' . $navHtml . '</nav>'
             . '<div class="side-foot"><a class="me' . ($cur === 'profile' ? ' on' : '') . '" href="?a=profile" title="Your profile">' . avatar($u['username'])
             . '<div><b>' . h($u['username']) . '</b><small>' . h($role) . '</small></div></a>'
             . '<div class="side-act"><button type="button" class="sm ghost" id="themeBtn" title="Toggle light / dark theme">' . icon('theme') . 'Theme</button>'
             . '<form method="post" action="?a=logout">' . csrf_field() . '<button class="sm ghost" type="submit">' . icon('logout') . 'Sign out</button></form></div></div></aside>'
             . '<div class="scrim" id="scrim"></div><div class="content"><header class="topbar"><button type="button" class="icon-btn ghost" id="navBtn" aria-label="Open menu">'
-            . icon('menu') . '</button><a class="brand" href="?a=dashboard">' . $logo . '<span><b>DPLY</b></span></a></header><main>';
+            . icon('menu') . '</button><a class="brand" href="?a=dashboard">' . $logo . '<span><b>DPLY</b></span></a>'
+            . ($proj ? '<span class="topbar-proj">' . icon('folder') . h($proj['name']) . '</span>' : '') . '</header><main>';
     } else {
         $shell = '<main class="bare"><div class="auth-brand">' . $logo . '<b>DPLY</b></div>';
     }
@@ -1943,7 +2322,7 @@ function layout_head(string $title, bool $nav = true): string
     $themeJs = "try{var t=localStorage.getItem('dply-theme');if(t)document.documentElement.setAttribute('data-theme',t);}catch(e){}";
     return '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
         . '<meta name="robots" content="noindex,nofollow"><meta name="color-scheme" content="light dark">'
-        . '<link rel="icon" href="data:image/svg+xml,' . rawurlencode('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#34d399"/><stop offset="1" stop-color="#22d3ee"/></linearGradient></defs><rect width="32" height="32" rx="8" fill="url(#g)"/><path d="M10 22l4-4m2-8c3-2 6-2 7-2 0 1 0 4-2 7l-5 4-4-4z" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>') . '"><title>' . h($title) . ' · DPLY</title>'
+        . '<link rel="icon" href="data:image/svg+xml,' . rawurlencode('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#34d399"/><stop offset="1" stop-color="#22d3ee"/></linearGradient></defs><rect width="32" height="32" rx="8" fill="url(#g)"/><path d="M10 22l4-4m2-8c3-2 6-2 7-2 0 1 0 4-2 7l-5 4-4-4z" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>') . '"><title>' . h($title) . (resolved_project_id() ? ' · ' . h(current_project()['name']) : '') . ' · DPLY</title>'
         . '<script nonce="' . $nonce . '">' . $themeJs . '</script><style>' . layout_css() . '</style></head>'
         . '<body' . ($u ? '' : ' class="auth"') . '>' . $shell;
 }
@@ -1997,6 +2376,8 @@ d.addEventListener('keydown',function(e){if(e.key==='Escape')d.body.classList.re
 d.querySelectorAll('[data-search]').forEach(function(inp){var sel=inp.getAttribute('data-search');inp.addEventListener('input',function(){var q=inp.value.toLowerCase().trim();
  d.querySelectorAll(sel).forEach(function(it){it.hidden=q!==''&&it.textContent.toLowerCase().indexOf(q)<0;});
  d.querySelectorAll('[data-group]').forEach(function(g){g.hidden=!g.querySelector(sel+':not([hidden])');});});});
+// Auto-submitting selects (project switcher)
+d.querySelectorAll('select[data-autosubmit]').forEach(function(s){s.addEventListener('change',function(){var f=s.form;if(f.requestSubmit){f.requestSubmit();}else{f.submit();}});});
 // Streaming pages: mark as finished
 var lv=$('live');if(lv){lv.classList.add('done');lv.lastChild.textContent='Finished';}
 })();
@@ -2056,7 +2437,7 @@ function stream_begin(string $title): void
         . ".observe(document.documentElement,{childList:true,subtree:true,characterData:true});";
     echo layout_head($title), '<script nonce="', csp_nonce(), '">', $js, '</script>',
         '<!--', str_repeat(' ', 2048), '-->',
-        page_head(h($title), 'Output streams live below — keep this tab open until it finishes.', '<span class="live" id="live"><i></i><span>Running…</span></span>'),
+        page_head(h($title), (resolved_project_id() ? current_project()['name'] . ' · ' : '') . 'Output streams live below — keep this tab open until it finishes.', '<span class="live" id="live"><i></i><span>Running…</span></span>'),
         '<pre class="log" id="log">';
     flush();
 }
@@ -2144,7 +2525,9 @@ function page_dashboard(): void
         $info .= '<tr><td class="k">' . h($k) . '</td><td>' . $v . '</td></tr>';
     }
 
-    $deps = db()->query('SELECT * FROM deployments ORDER BY id DESC LIMIT 6')->fetchAll();
+    $st = db()->prepare('SELECT * FROM deployments WHERE project_id = ? ORDER BY id DESC LIMIT 6');
+    $st->execute([current_project_id()]);
+    $deps = $st->fetchAll();
     $last = $deps[0] ?? null;
     $canDeploy = can('deploy');
     $dHtml = '';
@@ -2185,8 +2568,26 @@ function page_dashboard(): void
     }
 
     $u = current_user();
-    render('Dashboard', page_head('Welcome back, ' . h($u['username']), 'Health of ' . basename($root) . ' at a glance.')
-        . $warnHtml . $stats
+    $proj = current_project();
+    $others = '';
+    $plist = accessible_projects($u);
+    if (count($plist) > 1) {
+        foreach ($plist as $p) {
+            $last = project_last_deploy($p['id']);
+            $pRoot = rtrim(project_setting($p['id'], 'project_root'), '/');
+            $pDown = is_file("$pRoot/storage/framework/down");
+            $tone = !$last ? '' : ($last['status'] === 'success' ? 'ok' : ($last['status'] === 'failed' ? 'err' : 'warn'));
+            $on = $p['id'] === $proj['id'];
+            $others .= '<li><span class="dot ' . ($pDown ? 'err' : $tone) . '"></span><span class="who"><b>' . h($p['name']) . '</b> <span class="mute small">'
+                . h(project_setting($p['id'], 'branch')) . '</span>' . ($pDown ? ' ' . badge('maintenance', 'err') : '') . '</span>'
+                . ($last ? deploy_status_badge($last['status']) . '<span class="when">' . ago((int) $last['started_at']) . '</span>' : '<span class="when">never deployed</span>')
+                . ($on ? badge('current', 'ok') : project_switch_button($p['id'], 'dashboard', 'Open')) . '</li>';
+        }
+        $others = '<div class="card"><div class="card-h"><h2>' . icon('folder') . 'All projects <span class="badge">' . count($plist) . '</span></h2>'
+            . (can('admin') ? '<a class="small" href="?a=projects">Manage</a>' : '') . '</div><ul class="deps">' . $others . '</ul></div>';
+    }
+    render('Dashboard', page_head(h($proj['name']), 'Welcome back, ' . $u['username'] . ' — here is how ' . $proj['name'] . ' is doing.')
+        . $warnHtml . $stats . $others
         . '<div class="' . ($qa ? 'grid-main' : '') . '"><div class="stack"><div class="card"><h2>' . icon('dashboard') . 'Project</h2><div class="tbl"><table>' . $info . '</table></div></div>'
         . '<div class="card"><div class="card-h"><h2>' . icon('clock') . 'Recent deployments</h2>'
         . ($canDeploy && $deps ? '<a class="small" href="?a=deploy">View all</a>' : '') . '</div>'
@@ -2221,7 +2622,9 @@ function page_deploy(): void
         . '<pre class="small" style="margin-top:10px;max-height:220px">' . h(implode("\n", array_slice(explode("\n", $status), 0, 40))) . '</pre>'
         . '<p class="hint">With the "reset" strategy these tracked changes are overwritten on deploy.</p>';
 
-    $deps = db()->query('SELECT id, actor, kind, branch, status, commit_before, commit_after, started_at, finished_at FROM deployments ORDER BY id DESC LIMIT 30')->fetchAll();
+    $st = db()->prepare('SELECT id, actor, kind, branch, status, commit_before, commit_after, started_at, finished_at FROM deployments WHERE project_id = ? ORDER BY id DESC LIMIT 30');
+    $st->execute([current_project_id()]);
+    $deps = $st->fetchAll();
     $hist = '';
     foreach ($deps as $d) {
         $dur = $d['finished_at'] ? ((int) $d['finished_at'] - (int) $d['started_at']) . 's' : '…';
@@ -2253,9 +2656,9 @@ function page_deploy(): void
         $kvHtml .= '<dt>' . h($k) . '</dt><dd>' . $v . '</dd>';
     }
 
-    render('Deploy', page_head('Deploy', 'Pull the latest code from origin/' . $branch . ' and run your post-deploy steps.', $checkBtn)
+    render('Deploy', page_head('Deploy ' . h(current_project()['name']), 'Pull the latest code from origin/' . $branch . ' into ' . $root . ' and run your post-deploy steps.', $checkBtn)
         . '<div class="grid-main">'
-        . '<form method="post" action="?a=deploy" class="card" data-once data-confirm="Deploy origin/' . h($branch) . ' to this server now?">' . csrf_field()
+        . '<form method="post" action="?a=deploy" class="card" data-once data-confirm="Deploy origin/' . h($branch) . ' of ' . h(current_project()['name']) . ' now?">' . csrf_field()
         . '<input type="hidden" name="op" value="deploy"><h2>' . icon('deploy') . 'Deploy now</h2>'
         . '<ol class="pipeline"><li><b>Fetch</b>origin/' . h($branch) . '</li><li><b>Sync</b>update files</li><li><b>Run steps</b>selected below</li></ol>'
         . '<div class="sub-h" style="margin-top:0">Post-deploy steps</div>' . steps_checkboxes(default_steps())
@@ -2319,8 +2722,8 @@ function do_deploy(): void
         $target = null;
         $steps = $op === 'deploy' ? selected_steps((array) ($_POST['steps'] ?? [])) : default_steps();
         if ($op === 'rollback') {
-            $st = db()->prepare('SELECT commit_before FROM deployments WHERE id = ?');
-            $st->execute([(int) ($_POST['id'] ?? 0)]);
+            $st = db()->prepare('SELECT commit_before FROM deployments WHERE id = ? AND project_id = ?');
+            $st->execute([(int) ($_POST['id'] ?? 0), current_project_id()]);
             $target = (string) $st->fetchColumn();
             if (!preg_match('/^[0-9a-f]{40}$/', $target)) {
                 flash('err', 'That deployment has no commit to roll back to.');
@@ -2341,6 +2744,14 @@ function page_deploy_log(): void
     $st = db()->prepare('SELECT * FROM deployments WHERE id = ?');
     $st->execute([(int) ($_GET['id'] ?? 0)]);
     $d = $st->fetch();
+    if ($d && (int) $d['project_id'] !== current_project_id()) {
+        // Belongs to another project: follow it if allowed, so shared links keep working.
+        if (user_can_project(current_user(), (int) $d['project_id'])) {
+            use_project((int) $d['project_id']);
+        } else {
+            $d = null;
+        }
+    }
     if (!$d) {
         flash('err', 'Deployment not found.');
         redirect('?a=deploy');
@@ -2478,7 +2889,7 @@ function do_artisan(): void
 function page_terminal(): void
 {
     $full = can('terminal_full');
-    $cwd = $_SESSION['term_cwd'] ?? project_root();
+    $cwd = $_SESSION['term_cwd_' . current_project_id()] ?? project_root();
     $js = <<<'JS'
 (function(){var out=document.getElementById('tout'),inp=document.getElementById('tin'),cwd=document.getElementById('tcwd'),
 csrf=document.getElementById('tcsrf').value,hist=[],hi=0;
@@ -2491,7 +2902,7 @@ inp.addEventListener('keydown',function(e){
  var cmd=inp.value;if(!cmd.trim())return;hist.push(cmd);hi=hist.length;inp.value='';
  if(cmd.trim()==='clear'){out.textContent='';return;}
  add(cwd.textContent+' $ '+cmd+'\n','t-cmd');inp.disabled=true;
- fetch('?a=term_exec',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json','X-CSRF-Token':csrf},body:JSON.stringify({cmd:cmd})})
+ fetch('?a=term_exec',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json','X-CSRF-Token':csrf,'X-DPLY-Project':document.getElementById('tproj').value},body:JSON.stringify({cmd:cmd})})
  .then(function(r){return r.json();}).then(function(j){
    if(j.reauth){location.href='?a=reauth&return='+encodeURIComponent('?a=terminal');return;}
    if(j.output)add(j.output);if(j.error)add(j.error+'\n','t-err');
@@ -2509,7 +2920,7 @@ JS;
         . '</span><span>' . ($full ? 'sh' : 'restricted') . '</span></div><div class="term-out" id="tout" aria-live="polite"></div><div class="term-in"><span class="cwd" id="tcwd" title="' . h($cwd) . '">' . h($cwd) . '</span><span style="color:#5e697a">$</span>'
         . '<input id="tin" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Command"></div></div>'
         . '<div class="tips"><span><kbd>↑</kbd><kbd>↓</kbd> history</span><span><kbd>Ctrl</kbd>+<kbd>L</kbd> or <code>clear</code> to clear</span><span><code>cd</code> is remembered</span></div>'
-        . '<input type="hidden" id="tcsrf" value="' . h(csrf_token()) . '">' . $allow
+        . '<input type="hidden" id="tcsrf" value="' . h(csrf_token()) . '"><input type="hidden" id="tproj" value="' . current_project_id() . '">' . $allow
         . '<script nonce="' . csp_nonce() . '">' . $js . '</script>');
 }
 
@@ -2537,7 +2948,7 @@ function do_term_exec(): void
     }
     $full = can('terminal_full');
     $root = project_root();
-    $cwd = (string) ($_SESSION['term_cwd'] ?? $root);
+    $cwd = (string) ($_SESSION['term_cwd_' . current_project_id()] ?? $root);
     if (!is_dir($cwd) || (!$full && !path_within($cwd, $root))) {
         $cwd = $root;
     }
@@ -2551,7 +2962,7 @@ function do_term_exec(): void
         if (!$full && !path_within($new, $root)) {
             json_out(['error' => 'Restricted mode: cannot leave the project root.', 'exit' => 1, 'cwd' => $cwd]);
         }
-        $_SESSION['term_cwd'] = $new;
+        $_SESSION['term_cwd_' . current_project_id()] = $new;
         json_out(['output' => '', 'exit' => 0, 'cwd' => $new]);
     }
 
@@ -2652,7 +3063,7 @@ function env_parse_simple(string $content): array
 
 function env_backups(): array
 {
-    $files = glob(DPLY_DATA . '/env-backups/env-*') ?: [];
+    $files = glob(env_backup_dir() . '/env-*') ?: [];
     rsort($files);
     return $files;
 }
@@ -2666,7 +3077,7 @@ function page_env(): void
     $note = '';
     if (isset($_GET['load'])) {
         $b = basename((string) $_GET['load']);
-        $bf = DPLY_DATA . '/env-backups/' . $b;
+        $bf = env_backup_dir() . '/' . $b;
         if (preg_match('/^env-[0-9]{8}-[0-9]{6}-[a-f0-9]{6}$/', $b) && is_file($bf)) {
             $content = (string) file_get_contents($bf);
             $note = '<div class="flash warn">Backup <code>' . h($b) . '</code> loaded into the editor — review it and press Save to restore it.</div>';
@@ -2723,7 +3134,7 @@ function do_env(): void
         redirect('?a=env');
     }
     if ($old !== null) {
-        $bf = DPLY_DATA . '/env-backups/env-' . date('Ymd-His') . '-' . bin2hex(random_bytes(3));
+        $bf = env_backup_dir() . '/env-' . date('Ymd-His') . '-' . bin2hex(random_bytes(3));
         file_put_contents($bf, $old, LOCK_EX);
         @chmod($bf, 0600);
         foreach (array_slice(env_backups(), 50) as $extra) {
@@ -2794,17 +3205,25 @@ function list_keys(): array
 function page_keys(): void
 {
     $active = setting('ssh_key');
-    $html = page_head('SSH keys', 'Add a key\'s public part to your repository as a read-only deploy key, mark it active, and set Git auth to ssh in Settings.');
+    $pname = current_project()['name'];
+    $usedBy = [];
+    foreach (projects_all() as $p) {
+        if (($k = project_setting($p['id'], 'ssh_key')) !== '') {
+            $usedBy[$k][] = $p['name'];
+        }
+    }
+    $html = page_head('SSH keys', 'Keys are shared by all projects; each project picks the one it uses. Add a key\'s public part to the repository as a read-only deploy key.');
     if (!find_bin('ssh-keygen')) {
         $html .= '<div class="flash err">ssh-keygen was not found in PATH — install openssh-client.</div>';
     }
     $keysHtml = '';
     foreach (list_keys() as $name => $k) {
         $isActive = $name === $active;
-        $keysHtml .= '<div class="card"><div class="ucard-h"><div class="key-ic' . ($isActive ? ' on' : '') . '">' . icon('keys') . '</div><div class="n"><b>' . h($name) . ' ' . ($isActive ? badge('active for git', 'ok') : '') . '</b>'
-            . '<small><code>' . h($k['fp']) . '</code> · created ' . ago($k['mtime']) . '</small></div><div class="row">'
-            . ($isActive ? '' : '<form method="post" action="?a=keys">' . csrf_field() . '<input type="hidden" name="op" value="activate"><input type="hidden" name="name" value="' . h($name) . '"><button class="sm" type="submit">' . icon('check') . 'Use for git</button></form>')
-            . '<form method="post" action="?a=keys" data-confirm="Delete key ' . h($name) . ' permanently?">' . csrf_field() . '<input type="hidden" name="op" value="delete"><input type="hidden" name="name" value="' . h($name) . '"><button class="sm danger" type="submit">Delete</button></form>'
+        $others = array_values(array_diff($usedBy[$name] ?? [], [$pname]));
+        $keysHtml .= '<div class="card"><div class="ucard-h"><div class="key-ic' . ($isActive ? ' on' : '') . '">' . icon('keys') . '</div><div class="n"><b>' . h($name) . ' ' . ($isActive ? badge('used by ' . $pname, 'ok') : '') . '</b>'
+            . '<small><code>' . h($k['fp']) . '</code> · created ' . ago($k['mtime']) . ($others ? ' · also used by ' . h(implode(', ', $others)) : '') . '</small></div><div class="row">'
+            . ($isActive ? '' : '<form method="post" action="?a=keys">' . csrf_field() . '<input type="hidden" name="op" value="activate"><input type="hidden" name="name" value="' . h($name) . '"><button class="sm" type="submit">' . icon('check') . 'Use for ' . h($pname) . '</button></form>')
+            . '<form method="post" action="?a=keys" data-confirm="Delete key ' . h($name) . ' permanently?' . (!empty($usedBy[$name]) ? ' It is used by: ' . h(implode(', ', $usedBy[$name])) . '.' : '') . '">' . csrf_field() . '<input type="hidden" name="op" value="delete"><input type="hidden" name="name" value="' . h($name) . '"><button class="sm danger" type="submit">Delete</button></form>'
             . '</div></div><label style="margin:0"><span>Public key — paste this into your repository\'s deploy keys</span><textarea rows="3" readonly>' . h($k['pub']) . '</textarea></label></div>';
     }
     $html .= $keysHtml !== '' ? $keysHtml : '<div class="card">' . empty_state('keys', 'No SSH keys yet. Generate one below or import an existing key.') . '</div>';
@@ -2877,8 +3296,10 @@ function do_keys(): void
             if (valid_key_name($name) && is_file("$dir/$name")) {
                 @unlink("$dir/$name");
                 @unlink("$dir/$name.pub");
-                if (setting('ssh_key') === $name) {
-                    set_setting('ssh_key', '');
+                foreach (projects_all() as $p) {
+                    if (project_setting($p['id'], 'ssh_key') === $name) {
+                        set_project_setting($p['id'], 'ssh_key', '');
+                    }
                 }
                 audit('keys.delete', $name);
                 flash('ok', "Key '$name' deleted.");
@@ -2887,8 +3308,8 @@ function do_keys(): void
         case 'activate':
             if (valid_key_name($name) && is_file("$dir/$name")) {
                 set_setting('ssh_key', $name);
-                audit('keys.activate', $name);
-                flash('ok', "Key '$name' is now used for git over SSH." . (setting('git_auth') !== 'ssh' ? ' Note: Git auth is not set to "ssh" in Settings.' : ''));
+                audit('keys.activate', current_project()['slug'] . ": $name");
+                flash('ok', "Key '$name' is now used by " . current_project()['name'] . ' for git over SSH.' . (setting('git_auth') !== 'ssh' ? ' Note: Git auth is not set to "ssh" in Settings.' : ''));
             }
             break;
         case 'scan':
@@ -2988,6 +3409,46 @@ function perm_checkboxes(array $selected, bool $disableAdmin = false): string
     return $o;
 }
 
+/** "All projects" vs "Only these" picker. $stored: '' = all, else comma list of ids ('0' = none). */
+function project_access_field(string $stored, bool $isAdmin): string
+{
+    $all = projects_all();
+    if (count($all) < 2 && trim($stored) === '') {
+        return '';
+    }
+    $ids = trim($stored) === '' ? null : array_map('intval', explode(',', $stored));
+    $o = '<div class="sub-h">Project access</div><div class="access">'
+        . '<label class="chk"><input type="radio" name="access" value="all"' . ($ids === null ? ' checked' : '') . '><span><b style="font-weight:600">All projects</b>'
+        . '<br><span class="mute small">Including projects added later</span></span></label>'
+        . '<label class="chk" style="margin-top:6px"><input type="radio" name="access" value="some"' . ($ids !== null ? ' checked' : '') . '><span><b style="font-weight:600">Only selected projects</b></span></label>'
+        . '<div class="chks">';
+    foreach ($all as $p) {
+        $o .= '<label class="chk"><input type="checkbox" name="projects[]" value="' . $p['id'] . '"' . ($ids !== null && in_array($p['id'], $ids, true) ? ' checked' : '')
+            . '><span>' . h($p['name']) . ' <span class="mute small">' . h($p['slug']) . '</span></span></label>';
+    }
+    return $o . '</div>' . ($isAdmin ? '<p class="hint">Administrators can always open every project; this only applies if admin is removed.</p>' : '') . '</div>';
+}
+
+function projects_from_post(): string
+{
+    if (($_POST['access'] ?? 'all') !== 'some') {
+        return '';
+    }
+    $ids = array_values(array_filter(array_map('intval', (array) ($_POST['projects'] ?? [])), fn($id) => project_by_id($id) !== null));
+    return $ids ? implode(',', $ids) : '0';
+}
+
+function project_access_summary(array $u): string
+{
+    $ids = user_project_ids($u);
+    if ($ids === null) {
+        return count(projects_all()) > 1 ? badge('all projects') : '';
+    }
+    $names = array_map(fn($id) => project_by_id($id)['name'] ?? null, $ids);
+    $names = array_values(array_filter($names));
+    return $names ? badge(count($names) === 1 ? $names[0] : count($names) . ' projects') : badge('no projects', 'warn');
+}
+
 function page_users(): void
 {
     $me = current_user();
@@ -3001,7 +3462,7 @@ function page_users(): void
         $hid = csrf_field() . '<input type="hidden" name="id" value="' . $id . '">';
         $html .= '<div class="card"><div class="ucard-h">' . avatar((string) $u['username']) . '<div class="n"><b>' . h($u['username']) . ' '
             . ((int) $u['active'] ? badge('active', 'ok') : badge('disabled', 'err')) . ($u['totp_secret'] ? badge('2FA', 'ok') : '')
-            . ($locked ? badge('locked until ' . date('H:i', (int) $u['locked_until']), 'err') : '') . ($self ? badge('you') : '') . '</b>'
+            . ($locked ? badge('locked until ' . date('H:i', (int) $u['locked_until']), 'err') : '') . ($self ? badge('you') : '') . project_access_summary($u) . '</b>'
             . '<small>Last login ' . ($u['last_login_at'] ? ago((int) $u['last_login_at']) : 'never') . ($u['last_login_ip'] ? ' from ' . h($u['last_login_ip']) : '') . '</small></div>'
             . '<div class="row">'
             . ($locked || (int) $u['failed_count'] ? '<form method="post" action="?a=users">' . $hid . '<input type="hidden" name="op" value="unlock"><button class="sm" type="submit">' . icon('lock') . 'Unlock</button></form>' : '')
@@ -3013,13 +3474,15 @@ function page_users(): void
             . '<div class="sub-h" style="margin-top:0">Permissions</div><div class="chks">' . perm_checkboxes($perms, $self)
             . '<label class="chk"><input type="checkbox" name="active" value="1"' . ((int) $u['active'] ? ' checked' : '') . ($self ? ' disabled' : '') . '><span><b style="font-weight:600">Account enabled</b><br><span class="mute small">Disabled accounts cannot sign in</span></span></label></div>'
             . ($self ? '<input type="hidden" name="active" value="1">' : '')
+            . project_access_field((string) $u['projects'], in_array('admin', $perms, true))
             . '<button type="submit">' . icon('check') . 'Save permissions</button></form>'
             . '<form method="post" action="?a=users">' . $hid . '<input type="hidden" name="op" value="password"><div class="sub-h" style="margin-top:0">Reset password</div>'
             . '<label><span>New password (min 12 characters)</span><input type="password" name="password" autocomplete="new-password" required minlength="12"></label>'
             . '<button type="submit">' . icon('lock') . 'Set password</button></form></div></div>';
     }
     $html .= '<form method="post" action="?a=users" class="card" id="add-user">' . csrf_field() . '<h2>' . icon('plus') . 'Add user</h2><input type="hidden" name="op" value="create">'
-        . '<div class="grid-main" style="margin-bottom:6px"><div><div class="sub-h" style="margin-top:0">Permissions</div><div class="chks">' . perm_checkboxes(['deploy']) . '</div></div>'
+        . '<div class="grid-main" style="margin-bottom:6px"><div><div class="sub-h" style="margin-top:0">Permissions</div><div class="chks">' . perm_checkboxes(['deploy']) . '</div>'
+        . project_access_field('', false) . '</div>'
         . '<div><div class="sub-h" style="margin-top:0">Credentials</div><label><span>Username</span><input type="text" name="username" pattern="[A-Za-z0-9_.@-]{3,64}" required placeholder="jane.doe"></label>'
         . '<label><span>Password (min 12 characters)</span><input type="password" name="password" autocomplete="new-password" required minlength="12"></label>'
         . '<button class="primary" type="submit">' . icon('plus') . 'Create user</button></div></div></form>';
@@ -3054,8 +3517,8 @@ function do_users(): void
             } elseif (find_user($u)) {
                 flash('err', 'That username exists.');
             } else {
-                $pdo->prepare('INSERT INTO users (username, password_hash, perms, created_at) VALUES (?, ?, ?, ?)')->execute([$u, hash_pw($p), perms_from_post(), time()]);
-                audit('users.create', "$u [" . perms_from_post() . ']');
+                $pdo->prepare('INSERT INTO users (username, password_hash, perms, created_at, projects) VALUES (?, ?, ?, ?, ?)')->execute([$u, hash_pw($p), perms_from_post(), time(), projects_from_post()]);
+                audit('users.create', "$u [" . perms_from_post() . '] projects=[' . (projects_from_post() ?: 'all') . ']');
                 flash('ok', "User $u created.");
             }
             break;
@@ -3073,9 +3536,10 @@ function do_users(): void
                 flash('err', 'Cannot remove the last active administrator.');
                 break;
             }
-            $pdo->prepare('UPDATE users SET perms = ?, active = ?, session_version = session_version + (CASE WHEN active != ? THEN 1 ELSE 0 END) WHERE id = ?')
-                ->execute([$perms, $active, $active, $id]);
-            audit('users.update', "{$target['username']}: perms=[$perms] active=$active");
+            $projects = projects_from_post();
+            $pdo->prepare('UPDATE users SET perms = ?, active = ?, projects = ?, session_version = session_version + (CASE WHEN active != ? THEN 1 ELSE 0 END) WHERE id = ?')
+                ->execute([$perms, $active, $projects, $active, $id]);
+            audit('users.update', "{$target['username']}: perms=[$perms] active=$active projects=[" . ($projects ?: 'all') . ']');
             flash('ok', "Saved {$target['username']}.");
             break;
         case 'password':
@@ -3207,7 +3671,11 @@ function page_settings(): void
     foreach ($keys as $k) {
         $keyOpts .= '<option value="' . h($k) . '"' . (setting('ssh_key') === $k ? ' selected' : '') . '>' . h($k) . '</option>';
     }
-    render('Settings', page_head('Settings', 'Where the code comes from, how it is synced, and which tools run it.') . '<form method="post" action="?a=settings">' . csrf_field() . '<div class="grid">'
+    $pname = current_project()['name'];
+    render('Settings', page_head('Settings', 'Project settings apply only to ' . $pname . '. Global settings are shared by every project.',
+        can('admin') ? '<a class="btn" href="?a=projects">' . icon('folder') . 'All projects</a>' : '')
+        . '<form method="post" action="?a=settings">' . csrf_field()
+        . '<div class="sub-h" style="margin-top:0">' . icon('folder') . ' Project · ' . h($pname) . '</div><div class="grid">'
         . '<div class="card"><h2>' . icon('branch') . 'Repository</h2>'
         . '<label><span>Project root (the Laravel app to deploy)</span><input type="text" name="project_root" value="' . $s('project_root') . '" required></label>'
         . '<label><span>Repository URL — https://… for token auth, git@host:org/repo.git for SSH. Empty = keep existing origin.</span>'
@@ -3219,6 +3687,7 @@ function page_settings(): void
         . '<label><span>Access token ' . ($hasTok ? badge('stored (encrypted)', 'ok') : '') . ' — leave blank to keep</span><input type="password" name="git_token" autocomplete="off" placeholder="' . ($hasTok ? '••••••••' : 'ghp_… / glpat-…') . '"></label>'
         . ($hasTok ? '<label class="chk"><input type="checkbox" name="clear_token" value="1"><span>Remove stored token</span></label>' : '')
         . '<label><span>SSH key (manage under SSH keys)</span><select name="ssh_key">' . $keyOpts . '</select></label>'
+        . '<label><span>PHP CLI binary for this project — empty = auto (' . h(php_bin_auto()) . ')</span><input type="text" name="php_bin" value="' . $s('php_bin') . '" placeholder="/usr/bin/php8.3"></label>'
         . '</div>'
         . '<div class="card"><h2>' . icon('sync') . 'Sync behaviour</h2>'
         . '<label><span>Strategy</span><select name="sync_strategy"><option value="reset"' . $sel('sync_strategy', 'reset') . '>Force-sync: make tracked files identical to origin (recommended)</option>'
@@ -3230,8 +3699,8 @@ function page_settings(): void
         . '<textarea name="custom_commands" rows="4">' . $s('custom_commands') . '</textarea></label>'
         . '<label><span>Maintenance bypass secret (artisan down --secret) — optional</span><input type="text" name="maint_secret" value="' . $s('maint_secret') . '" pattern="[A-Za-z0-9_-]*"></label>'
         . '</div>'
+        . '</div><div class="sub-h">' . icon('settings') . ' Global · all projects</div><div class="grid">'
         . '<div class="card"><h2>' . icon('terminal') . 'Binaries &amp; limits</h2>'
-        . '<label><span>PHP CLI binary — empty = auto (' . h(php_bin()) . ')</span><input type="text" name="php_bin" value="' . $s('php_bin') . '"></label>'
         . '<label><span>Composer — command name or path to composer.phar</span><input type="text" name="composer_bin" value="' . $s('composer_bin') . '"></label>'
         . '<label><span>Git binary</span><input type="text" name="git_bin" value="' . $s('git_bin') . '"></label>'
         . '<label><span>Per-command timeout (seconds)</span><input type="number" name="cmd_timeout" min="30" value="' . $s('cmd_timeout') . '"></label>'
@@ -3246,27 +3715,18 @@ function do_settings(): void
     $op = (string) ($_POST['op'] ?? 'save');
     $errs = [];
     $root = rtrim(trim((string) ($_POST['project_root'] ?? '')), '/');
-    $real = $root !== '' ? realpath($root) : false;
-    if ($real === false || !is_dir($real)) {
-        $errs[] = 'Project root does not exist.';
+    [$real, $e] = project_root_check($root, current_project_id());
+    if ($e) {
+        $errs[] = $e;
     }
     $url = trim((string) ($_POST['repo_url'] ?? ''));
     $auth = in_array($_POST['git_auth'] ?? '', ['none', 'token', 'ssh'], true) ? (string) $_POST['git_auth'] : 'none';
-    if ($url !== '') {
-        $parts = parse_url($url);
-        if ($url[0] === '-' || preg_match('/\s/', $url)) {
-            $errs[] = 'Invalid repository URL.';
-        } elseif (preg_match('#^https?://#i', $url) && (isset($parts['user']) || isset($parts['pass']))) {
-            $errs[] = 'Do not embed credentials in the URL — use the token field instead.';
-        } elseif ($auth === 'token' && !preg_match('#^https://#i', $url)) {
-            $errs[] = 'Token authentication requires an https:// URL.';
-        } elseif ($auth === 'ssh' && preg_match('#^https?://#i', $url)) {
-            $errs[] = 'SSH authentication requires an SSH URL (git@host:org/repo.git or ssh://…).';
-        }
+    if ($e = repo_url_error($url, $auth)) {
+        $errs[] = $e;
     }
     $branch = trim((string) ($_POST['branch'] ?? ''));
-    if (!preg_match('#^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$#', $branch) || str_contains($branch, '..') || str_ends_with($branch, '.lock')) {
-        $errs[] = 'Invalid branch name.';
+    if ($e = branch_error($branch)) {
+        $errs[] = $e;
     }
     $tokUser = trim((string) ($_POST['git_token_user'] ?? '')) ?: 'x-access-token';
     if (str_contains($tokUser, ':')) {
@@ -3314,7 +3774,7 @@ function do_settings(): void
     set_setting('git_bin', trim((string) ($_POST['git_bin'] ?? '')) ?: 'git');
     set_setting('cmd_timeout', (string) max(30, (int) ($_POST['cmd_timeout'] ?? 900)));
     set_setting('term_allow', str_replace("\r\n", "\n", trim((string) ($_POST['term_allow'] ?? ''))));
-    audit('settings.save', "repo=$url branch=$branch auth=$auth" . ($tok !== '' ? ' (token updated)' : '') . (!empty($_POST['clear_token']) ? ' (token removed)' : ''));
+    audit('settings.save', current_project()['slug'] . ": repo=$url branch=$branch auth=$auth" . ($tok !== '' ? ' (token updated)' : '') . (!empty($_POST['clear_token']) ? ' (token removed)' : ''));
 
     if ($op === 'test_git') {
         $target = $url !== '' ? $url : (string) git_out(['remote', 'get-url', 'origin']);
@@ -3334,6 +3794,48 @@ function do_settings(): void
     redirect('?a=settings');
 }
 
+/** Returns [realpath|null, error|null] for a project root; it must exist and not belong to another project. */
+function project_root_check(string $root, int $exceptProjectId = 0): array
+{
+    $real = $root !== '' ? realpath($root) : false;
+    if ($real === false || !is_dir($real)) {
+        return [null, 'Project root does not exist.'];
+    }
+    if ($other = project_using_root($real, $exceptProjectId)) {
+        return [null, 'That directory is already used by project "' . $other['name'] . '".'];
+    }
+    return [$real, null];
+}
+
+function repo_url_error(string $url, string $auth): ?string
+{
+    if ($url === '') {
+        return null;
+    }
+    $parts = parse_url($url);
+    if ($url[0] === '-' || preg_match('/\s/', $url)) {
+        return 'Invalid repository URL.';
+    }
+    if (preg_match('#^https?://#i', $url) && (isset($parts['user']) || isset($parts['pass']))) {
+        return 'Do not embed credentials in the URL — use the token field instead.';
+    }
+    if ($auth === 'token' && !preg_match('#^https://#i', $url)) {
+        return 'Token authentication requires an https:// URL.';
+    }
+    if ($auth === 'ssh' && preg_match('#^https?://#i', $url)) {
+        return 'SSH authentication requires an SSH URL (git@host:org/repo.git or ssh://…).';
+    }
+    return null;
+}
+
+function branch_error(string $branch): ?string
+{
+    if (!preg_match('#^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$#', $branch) || str_contains($branch, '..') || str_ends_with($branch, '.lock')) {
+        return 'Invalid branch name.';
+    }
+    return null;
+}
+
 // ---- src/69-page-audit-profile.php -----------------------------------
 
 // ============================================================================
@@ -3344,25 +3846,26 @@ function page_audit(): void
 {
     $q = trim((string) ($_GET['q'] ?? ''));
     if ($q !== '') {
-        $st = db()->prepare("SELECT * FROM audit WHERE action LIKE ? OR actor LIKE ? OR ip LIKE ? OR detail LIKE ? ORDER BY id DESC LIMIT 500");
+        $st = db()->prepare("SELECT a.*, p.name AS project FROM audit a LEFT JOIN projects p ON p.id = a.project_id"
+            . " WHERE a.action LIKE ? OR a.actor LIKE ? OR a.ip LIKE ? OR a.detail LIKE ? OR p.name LIKE ? ORDER BY a.id DESC LIMIT 500");
         $like = '%' . str_replace(['%', '_'], ['\%', '\_'], $q) . '%';
-        $st->execute([$like, $like, $like, $like]);
+        $st->execute([$like, $like, $like, $like, $like]);
         $rows = $st->fetchAll();
     } else {
-        $rows = db()->query('SELECT * FROM audit ORDER BY id DESC LIMIT 500')->fetchAll();
+        $rows = db()->query('SELECT a.*, p.name AS project FROM audit a LEFT JOIN projects p ON p.id = a.project_id ORDER BY a.id DESC LIMIT 500')->fetchAll();
     }
     $html = '';
     foreach ($rows as $r) {
         $cls = str_starts_with($r['action'], 'auth.fail') || str_starts_with($r['action'], 'security.block') || str_ends_with($r['action'], 'denied') ? 'err'
             : (str_starts_with($r['action'], 'deploy') ? 'ok' : '');
-        $html .= '<tr class="r"><td class="small" style="white-space:nowrap">' . ago((int) $r['created_at']) . '</td><td style="white-space:nowrap">' . h($r['actor']) . '</td><td><code>' . h($r['ip']) . '</code></td><td>'
+        $html .= '<tr class="r"><td class="small" style="white-space:nowrap">' . ago((int) $r['created_at']) . '</td><td style="white-space:nowrap">' . h($r['actor']) . '</td><td><code>' . h($r['ip']) . '</code></td><td class="small" style="white-space:nowrap">' . h($r['project'] ?? '—') . '</td><td>'
             . badge($r['action'], $cls) . '</td><td class="small">' . h($r['detail']) . '</td></tr>';
     }
     render('Audit log', page_head('Audit log', 'Every sign-in, deployment, command and setting change — newest first (up to 500 entries).')
         . '<form method="get" class="row" style="margin-bottom:18px"><input type="hidden" name="a" value="audit"><div class="searchbox">' . icon('search')
-        . '<input type="text" name="q" value="' . h($q) . '" data-search="#audit-rows tr.r" placeholder="Search action, user, IP or detail — Enter searches the full log" aria-label="Search audit log"></div>'
+        . '<input type="text" name="q" value="' . h($q) . '" data-search="#audit-rows tr.r" placeholder="Search action, user, IP, project or detail — Enter searches the full log" aria-label="Search audit log"></div>'
         . '<button type="submit">Search</button>' . ($q !== '' ? '<a class="btn ghost" href="?a=audit">' . icon('x') . 'Clear</a>' : '') . '</form>'
-        . ($html !== '' ? '<div class="card tbl"><table id="audit-rows"><tr><th>When</th><th>User</th><th>IP</th><th>Action</th><th>Detail</th></tr>' . $html . '</table></div>'
+        . ($html !== '' ? '<div class="card tbl"><table id="audit-rows"><tr><th>When</th><th>User</th><th>IP</th><th>Project</th><th>Action</th><th>Detail</th></tr>' . $html . '</table></div>'
             : '<div class="card">' . empty_state('search', $q !== '' ? 'No entries match "' . $q . '".' : 'The audit log is empty.') . '</div>'));
 }
 
@@ -3452,6 +3955,184 @@ function do_profile(): void
     redirect('?a=profile');
 }
 
+// ---- src/70-page-projects.php ----------------------------------------
+
+// ============================================================================
+//  Projects (admin)
+// ============================================================================
+
+function project_switch_button(int $pid, string $return, string $label, string $cls = 'sm'): string
+{
+    return '<form method="post" action="?a=project_switch">' . csrf_field() . '<input type="hidden" name="id" value="' . $pid . '">'
+        . '<input type="hidden" name="return" value="' . h($return) . '"><button class="' . h($cls) . '" type="submit">' . $label . '</button></form>';
+}
+
+function page_projects(): void
+{
+    $cur = current_project_id();
+    $all = projects_all();
+    $restricted = 0;
+    foreach (db()->query("SELECT perms, projects FROM users WHERE projects != ''") as $u) {
+        $restricted += user_project_ids($u) !== null ? 1 : 0;
+    }
+    $cards = '';
+    foreach ($all as $p) {
+        $pid = $p['id'];
+        $root = project_setting($pid, 'project_root');
+        $last = project_last_deploy($pid);
+        $down = is_file(rtrim($root, '/') . '/storage/framework/down');
+        $on = $pid === $cur;
+        $count = (int) db()->query('SELECT COUNT(*) FROM deployments WHERE project_id = ' . $pid)->fetchColumn();
+        $repo = project_setting($pid, 'repo_url');
+        $cards .= '<div class="pcard' . ($on ? ' on' : '') . '"><div class="pcard-h"><div class="key-ic' . ($on ? ' on' : '') . '">' . icon('folder') . '</div>'
+            . '<div class="n"><b>' . h($p['name']) . '</b><small>' . h($p['slug']) . '</small></div>' . ($on ? badge('current', 'ok') : '') . '</div>'
+            . '<div class="pmeta"><span title="' . h($root) . '">' . icon('disk') . h(strlen($root) > 38 ? '…' . substr($root, -37) : $root)
+            . (is_dir($root) ? '' : ' ' . badge('missing', 'err')) . '</span></div>'
+            . '<div class="pmeta"><span>' . icon('branch') . h(project_setting($pid, 'branch')) . '</span>'
+            . '<span>' . icon('lock') . h(project_setting($pid, 'git_auth')) . '</span>'
+            . ($down ? '<span>' . badge('maintenance', 'err') . '</span>' : '')
+            . '<span>' . icon('deploy') . ($last ? deploy_status_badge($last['status']) . ' ' . ago((int) $last['started_at']) : 'never deployed') . '</span></div>'
+            . ($repo !== '' ? '<div class="pmeta"><span class="break">' . icon('sync') . '<code>' . h($repo) . '</code></span></div>' : '')
+            . '<div class="row">'
+            . ($on ? '<a class="btn sm primary" href="?a=dashboard">' . icon('dashboard') . 'Open</a><a class="btn sm" href="?a=settings">' . icon('settings') . 'Settings</a>'
+                : project_switch_button($pid, 'dashboard', icon('arrow') . 'Open', 'sm primary') . project_switch_button($pid, 'settings', icon('settings') . 'Settings'))
+            . '<details class="pmore" style="margin-left:auto"><summary class="btn sm ghost">Edit</summary><div class="pmore-b">'
+            . '<form method="post" action="?a=projects">' . csrf_field() . '<input type="hidden" name="op" value="rename"><input type="hidden" name="id" value="' . $pid . '">'
+            . '<label><span>Name</span><input type="text" name="name" value="' . h($p['name']) . '" required maxlength="60"></label>'
+            . '<label><span>Slug (used by the CLI: --project=…)</span><input type="text" name="slug" value="' . h($p['slug']) . '" required pattern="[a-z0-9][a-z0-9\-]{0,39}"></label>'
+            . '<button class="sm" type="submit">' . icon('check') . 'Save</button></form>'
+            . (count($all) > 1 ? '<hr class="divider"><form method="post" action="?a=projects" data-confirm="Remove project &quot;' . h($p['name']) . '&quot; from DPLY? Its settings, ' . $count
+                . ' deployment record(s) and .env backups are deleted. Files in ' . h($root) . ' are NOT touched.">' . csrf_field()
+                . '<input type="hidden" name="op" value="delete"><input type="hidden" name="id" value="' . $pid . '"><button class="sm danger" type="submit">Remove project</button></form>'
+                : '<p class="hint">The only project cannot be removed.</p>')
+            . '</div></details></div></div>';
+    }
+
+    $copyOpts = '<option value="">— start with defaults —</option>';
+    foreach ($all as $p) {
+        $copyOpts .= '<option value="' . $p['id'] . '">' . h($p['name']) . '</option>';
+    }
+    render('Projects', page_head('Projects', 'Every app this console deploys. Settings, deploy history, .env backups and the terminal folder are kept separately per project.',
+        '<a class="btn primary" href="#new-project">' . icon('plus') . 'New project</a>')
+        . '<div class="pgrid" style="margin-bottom:18px">' . $cards . '</div>'
+        . '<p class="hint" style="margin:0 0 22px">' . icon('users', 'small') . ' Administrators can open every project. '
+        . ($restricted ? $restricted . ' user(s) are limited to specific projects — see ' : 'Other users can be limited to specific projects under ')
+        . '<a href="?a=users">Users</a>.</p>'
+        . '<form method="post" action="?a=projects" class="card" id="new-project">' . csrf_field() . '<input type="hidden" name="op" value="create">'
+        . '<h2>' . icon('plus') . 'New project</h2>'
+        . '<div class="grid" style="margin-bottom:6px"><div>'
+        . '<label><span>Name</span><input type="text" name="name" required maxlength="60" placeholder="Shop API"></label>'
+        . '<label><span>Slug — optional, derived from the name</span><input type="text" name="slug" pattern="[a-z0-9][a-z0-9\-]{0,39}" placeholder="shop-api"></label>'
+        . '<label><span>Project root — the Laravel app\'s directory on this server</span><input type="text" name="project_root" required placeholder="/var/www/shop-api"></label>'
+        . '</div><div>'
+        . '<label><span>Repository URL — optional, can be set later</span><input type="text" name="repo_url" placeholder="git@github.com:org/shop-api.git"></label>'
+        . '<label><span>Branch to deploy</span><input type="text" name="branch" value="main" required></label>'
+        . '<label><span>Copy auth, sync options and post-deploy steps from</span><select name="copy_from">' . $copyOpts . '</select></label>'
+        . '</div></div><div class="actions" style="margin-top:0"><button class="primary" type="submit">' . icon('plus') . 'Create project</button>'
+        . '<span class="small mute">You\'ll be switched to the new project and taken to its settings.</span></div></form>');
+}
+
+function do_projects(): void
+{
+    $op = (string) ($_POST['op'] ?? '');
+    $pdo = db();
+    $id = (int) ($_POST['id'] ?? 0);
+    $target = $id ? project_by_id($id) : null;
+    if ($op !== 'create' && !$target) {
+        flash('err', 'Project not found.');
+        redirect('?a=projects');
+    }
+    $name = trim((string) ($_POST['name'] ?? ''));
+    $slug = strtolower(trim((string) ($_POST['slug'] ?? '')));
+    switch ($op) {
+        case 'create':
+            $slug = $slug !== '' ? $slug : slugify($name);
+            $root = rtrim(trim((string) ($_POST['project_root'] ?? '')), '/');
+            [$real, $rootErr] = project_root_check($root);
+            $url = trim((string) ($_POST['repo_url'] ?? ''));
+            $branch = trim((string) ($_POST['branch'] ?? 'main'));
+            $copy = (int) ($_POST['copy_from'] ?? 0);
+            $copy = $copy && project_by_id($copy) ? $copy : 0;
+            $auth = $copy ? project_setting($copy, 'git_auth') : 'none';
+            $err = $name === '' || mb_strlen($name) > 60 ? 'Name is required (max 60 characters).'
+                : (!valid_slug($slug) ? 'Slug: lowercase letters, digits and dashes (max 40).'
+                : (project_by_ref($slug) ? "Slug '$slug' is already taken." : ($rootErr ?? repo_url_error($url, $auth) ?? branch_error($branch))));
+            if ($err) {
+                flash('err', $err);
+                redirect('?a=projects#new-project');
+            }
+            $pdo->prepare('INSERT INTO projects (slug, name, created_at) VALUES (?, ?, ?)')->execute([$slug, $name, time()]);
+            $pid = (int) $pdo->lastInsertId();
+            projects_changed();
+            if ($copy) {
+                foreach (project_settings_raw($copy) as $k => $v) {
+                    if (!in_array($k, ['project_root', 'repo_url', 'branch'], true)) {
+                        set_project_setting($pid, $k, $v);
+                    }
+                }
+            }
+            set_project_setting($pid, 'project_root', (string) $real);
+            set_project_setting($pid, 'repo_url', $url);
+            set_project_setting($pid, 'branch', $branch);
+            use_project($pid);
+            audit('project.create', "$slug root=$real" . ($copy ? ' (copied from ' . project_by_id($copy)['slug'] . ')' : ''));
+            flash('ok', "Project \"$name\" created. Review its settings below, then deploy.");
+            redirect('?a=settings');
+            // no break — redirect() never returns
+        case 'rename':
+            if ($name === '' || mb_strlen($name) > 60) {
+                flash('err', 'Name is required (max 60 characters).');
+            } elseif (!valid_slug($slug)) {
+                flash('err', 'Slug: lowercase letters, digits and dashes (max 40).');
+            } elseif (($o = project_by_ref($slug)) && $o['id'] !== $id) {
+                flash('err', "Slug '$slug' is already taken.");
+            } else {
+                $pdo->prepare('UPDATE projects SET name = ?, slug = ? WHERE id = ?')->execute([$name, $slug, $id]);
+                projects_changed();
+                audit('project.rename', "{$target['slug']} → $slug ($name)");
+                flash('ok', 'Project saved.');
+            }
+            break;
+        case 'delete':
+            if (count(projects_all()) <= 1) {
+                flash('err', 'The only project cannot be removed.');
+                break;
+            }
+            $lock = fopen(DPLY_DATA . "/deploy-p$id.lock", 'c');
+            if (!$lock || !flock($lock, LOCK_EX | LOCK_NB)) {
+                flash('err', 'A deployment of this project is running — try again when it has finished.');
+                break;
+            }
+            $pdo->beginTransaction();
+            $pdo->prepare('DELETE FROM project_settings WHERE project_id = ?')->execute([$id]);
+            $pdo->prepare('DELETE FROM deployments WHERE project_id = ?')->execute([$id]);
+            $pdo->prepare('DELETE FROM projects WHERE id = ?')->execute([$id]);
+            // Drop the id from users' project restrictions.
+            foreach ($pdo->query("SELECT id, projects FROM users WHERE projects != ''")->fetchAll() as $u) {
+                // '' means "all projects", so a user restricted to only this project becomes '0' (no project), never ''.
+                $left = array_values(array_diff(array_filter(explode(',', (string) $u['projects'])), [(string) $id, '0']));
+                $pdo->prepare('UPDATE users SET projects = ? WHERE id = ?')->execute([$left ? implode(',', $left) : '0', $u['id']]);
+            }
+            $pdo->commit();
+            foreach (glob(DPLY_DATA . "/env-backups/p$id/env-*") ?: [] as $f) {
+                @unlink($f);
+            }
+            @rmdir(DPLY_DATA . "/env-backups/p$id");
+            flock($lock, LOCK_UN);
+            fclose($lock);
+            @unlink(DPLY_DATA . "/deploy-p$id.lock");
+            projects_changed();
+            if (current_project_id() === $id) {
+                $first = accessible_projects(current_user());
+                use_project($first ? reset($first)['id'] : null);
+            }
+            audit('project.delete', "{$target['slug']} ({$target['name']})");
+            flash('ok', "Project \"{$target['name']}\" removed. Its files on disk were not touched.");
+            break;
+    }
+    redirect('?a=projects');
+}
+
 // ---- src/80-cli.php --------------------------------------------------
 
 // ============================================================================
@@ -3475,8 +4156,46 @@ function cli_main(array $argv): int
             $opts[$m[1]] = $m[2] ?? true;
         }
     }
+    if (isset($opts['project'])) {
+        $p = is_string($opts['project']) ? project_by_ref($opts['project']) : null;
+        if (!$p) {
+            fwrite(STDERR, "Unknown project '" . (is_string($opts['project']) ? $opts['project'] : '') . "'. Run: php index.php projects\n");
+            return 1;
+        }
+        use_project($p['id']);
+    }
     $code = 0;
     switch ($cmd) {
+        case 'projects':
+            foreach (projects_all() as $p) {
+                $last = project_last_deploy($p['id']);
+                printf("%-20s %-28s %-12s %s\n", $p['slug'], mb_strimwidth($p['name'], 0, 28, '…'), project_setting($p['id'], 'branch'),
+                    project_setting($p['id'], 'project_root') . ($last ? "  (last deploy: {$last['status']} " . date('Y-m-d H:i', (int) $last['started_at']) . ')' : ''));
+            }
+            break;
+        case 'project:add':
+            $slug = strtolower((string) $arg);
+            $root = is_string($opts['root'] ?? null) ? rtrim($opts['root'], '/') : '';
+            $name = is_string($opts['name'] ?? null) ? trim($opts['name']) : $slug;
+            $branch = is_string($opts['branch'] ?? null) ? $opts['branch'] : 'main';
+            $repo = is_string($opts['repo'] ?? null) ? trim($opts['repo']) : '';
+            [$real, $rootErr] = project_root_check($root);
+            $err = !valid_slug($slug) ? 'Usage: project:add <slug> --root=/path [--name="Name"] [--branch=main] [--repo=URL]  (slug: a-z, 0-9, -)'
+                : (project_by_ref($slug) ? "Project '$slug' already exists." : ($rootErr ?? branch_error($branch) ?? repo_url_error($repo, 'none')));
+            if ($err) {
+                echo $err . "\n";
+                $code = 1;
+                break;
+            }
+            db()->prepare('INSERT INTO projects (slug, name, created_at) VALUES (?, ?, ?)')->execute([$slug, $name !== '' ? $name : $slug, time()]);
+            $pid = (int) db()->lastInsertId();
+            projects_changed();
+            foreach (['project_root' => (string) $real, 'branch' => $branch, 'repo_url' => $repo] as $k => $v) {
+                set_project_setting($pid, $k, $v);
+            }
+            audit('project.create', "$slug root=$real", 'cli', 'cli');
+            echo "✔ Project '$slug' added. Configure auth and steps in the web console, or deploy with: deploy --project=$slug\n";
+            break;
         case 'setup':
             if (setup_done() && empty($opts['force'])) {
                 echo "Already set up. Use http:set, user:add, user:password (or setup --force).\n";
@@ -3491,6 +4210,10 @@ function cli_main(array $argv): int
                     return 1;
                 }
                 set_setting('project_root', (string) realpath($root));
+                if (count(projects_all()) === 1 && ($name = basename((string) realpath($root))) !== '') {
+                    db()->prepare('UPDATE projects SET name = ?, slug = ? WHERE id = ?')->execute([$name, slugify($name) ?: 'default', current_project_id()]);
+                    projects_changed();
+                }
             }
             echo "\n-- HTTP Basic auth (outer gate) --\n";
             if (!cli_set_http()) {
@@ -3600,7 +4323,7 @@ function cli_main(array $argv): int
                     echo $s;
                 }
             });
-            echo "\n" . $r['msg'] . ($r['id'] ? " (#{$r['id']})" : '') . "\n";
+            echo "\n[" . (current_project()['slug'] ?? '?') . '] ' . $r['msg'] . ($r['id'] ? " (#{$r['id']})" : '') . "\n";
             $code = $r['ok'] ? 0 : 1;
             break;
         default:
@@ -3617,7 +4340,12 @@ DPLY {$GLOBALS['argv'][0]} — commands:
   blocks                   List currently blocked IPs
   unblock <ip>|--all       Remove IP blocks
   allowlist:clear          Remove the IP allow-list (if you locked yourself out)
+  projects                 List projects
+  project:add <slug> --root=/path [--name="Name"] [--branch=main] [--repo=URL]
   deploy [--steps=a,b,c]   Run a deployment from the command line
+
+Project-specific commands (deploy) act on the first project unless you pass
+--project=<slug>, e.g.: php index.php deploy --project=shop-api
 
 Run as the same user PHP-FPM/Apache uses, e.g.: sudo -u www-data php index.php setup
 

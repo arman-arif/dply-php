@@ -75,6 +75,9 @@ function icon(string $name, string $cls = ''): string
         'plus'      => '<path d="M12 5v14M5 12h14"/>',
         'download'  => '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/>',
         'sync'      => '<path d="M21 2v6h-6M3 22v-6h6"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8M21 12a9 9 0 0 1-15 6.7L3 16"/>',
+        'folder'    => '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
+        'projects'  => '<path d="M2 9a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2z"/><path d="M6 7V5a2 2 0 0 1 2-2h4l2 2h6a2 2 0 0 1 2 2v7"/>',
+        'chevrons'  => '<path d="m7 15 5 5 5-5M7 9l5-5 5 5"/>',
         'list'      => '<path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>',
     ];
     return '<svg class="ic' . ($cls ? ' ' . $cls : '') . '" viewBox="0 0 24 24" aria-hidden="true">' . ($p[$name] ?? '') . '</svg>';
@@ -156,6 +159,36 @@ a{color:var(--link);text-decoration:none}a:hover{text-decoration:underline}
 main{width:100%;max-width:1240px;margin:0 auto;padding:30px 34px 56px}
 .scrim{display:none}
 
+/* ---- project switcher ---- */
+.proj{margin:2px 0 4px}
+.proj-box{position:relative;display:flex;align-items:center;gap:10px;margin:0;padding:8px 10px;border:1px solid var(--line2);border-radius:11px;background:var(--panel);cursor:pointer;transition:border-color .15s,box-shadow .15s}
+.proj-box:hover{border-color:var(--faint)}.proj-box:focus-within{border-color:var(--acc);box-shadow:0 0 0 3px var(--ring)}
+.proj-box.static{cursor:default}.proj-box>.ic{color:var(--acc)}
+.proj-t{flex:1;min-width:0;display:block}.proj-t small{display:block;font-size:10.5px;font-weight:650;text-transform:uppercase;letter-spacing:.08em;color:var(--faint);margin:0}
+.proj-t b{display:block;font-size:13.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.proj-box select,.proj-box select:hover,.proj-box select:focus{border:0;box-shadow:none;background:none;height:auto;padding:0;margin:0;font-weight:650;font-size:13.5px;color:var(--text);cursor:pointer;width:100%;
+ position:static;text-overflow:ellipsis}
+.proj-chev{width:15px;height:15px;color:var(--faint);pointer-events:none}
+.proj-add{display:grid;place-items:center;width:26px;height:26px;border-radius:7px;color:var(--mute)}.proj-add:hover{background:var(--panel2);color:var(--text)}.proj-add .ic{width:15px;height:15px}
+.topbar-proj{margin-left:auto;display:inline-flex;align-items:center;gap:6px;max-width:50%;padding:4px 10px;border-radius:99px;background:var(--acc-soft);font-size:12.5px;font-weight:600;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.topbar-proj .ic{width:14px;height:14px;color:var(--acc)}
+.pgrid{display:grid;gap:14px;grid-template-columns:repeat(auto-fill,minmax(280px,1fr))}
+.pcard{display:flex;flex-direction:column;gap:12px;padding:18px;border:1px solid var(--line);border-radius:var(--r);background:var(--panel);box-shadow:var(--shadow);min-width:0}
+.pcard.on{border-color:color-mix(in srgb,var(--acc) 50%,transparent);box-shadow:0 0 0 3px var(--acc-soft),var(--shadow)}
+.pcard-h{display:flex;align-items:center;gap:12px;min-width:0}.pcard-h .n{flex:1;min-width:0}
+.pcard-h b{display:block;font-size:15px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.pcard-h small{display:block;color:var(--faint);font-size:12px;font-family:var(--mono)}
+.pmeta{display:flex;flex-wrap:wrap;gap:6px 14px;color:var(--mute);font-size:12.5px}.pmeta span{display:inline-flex;align-items:center;gap:5px;min-width:0}
+.pmeta .ic{width:14px;height:14px;color:var(--faint)}
+.pcard .row{margin-top:auto}
+.pmore{position:relative}.pmore summary{list-style:none}.pmore summary::-webkit-details-marker{display:none}
+.pmore-b{position:absolute;right:0;top:calc(100% + 6px);z-index:20;width:min(300px,80vw);padding:16px;background:var(--panel);border:1px solid var(--line2);border-radius:12px;box-shadow:0 20px 50px -18px rgba(0,0,0,.45)}
+.pmore-b label{margin-bottom:12px}.pmore-b .divider{margin:14px 0}
+.sub-h{display:flex;align-items:center;gap:7px}.sub-h .ic{width:15px;height:15px}
+.hint .ic.small,.hint .ic{width:14px;height:14px;vertical-align:-2px}
+.access{border:1px solid var(--line);border-radius:12px;padding:12px;margin-bottom:16px}
+.access .chks{margin:10px 0 0}.access .chk{margin:0}
+.access:has(input[value=all]:checked) .chks{opacity:.45;pointer-events:none}
+
 /* ---- typography ---- */
 .phead{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:14px 20px;margin-bottom:24px}
 .phead-t{min-width:0}
@@ -209,7 +242,7 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--acc);box
 input[readonly],textarea[readonly]{background:var(--code);color:var(--mute)}
 select{appearance:none;-webkit-appearance:none;padding-right:36px;background-image:{$chev};background-repeat:no-repeat;background-position:right 11px center;background-size:16px;cursor:pointer}
 textarea{font:12.5px/1.6 var(--mono);resize:vertical;min-height:80px}
-input[type=checkbox]{width:16px;height:16px;margin:2px 0 0;flex:none;accent-color:var(--acc);cursor:pointer}
+input[type=checkbox],input[type=radio]{width:16px;height:16px;margin:2px 0 0;flex:none;accent-color:var(--acc);cursor:pointer}
 .chk{display:flex;gap:11px;align-items:flex-start;margin:0 0 6px;padding:9px 12px;border:1px solid var(--line);border-radius:10px;cursor:pointer;transition:background .15s,border-color .15s;line-height:1.45}
 .chk:hover{background:var(--panel2)}.chk:has(input:checked){border-color:color-mix(in srgb,var(--acc) 45%,transparent);background:var(--acc-soft)}
 .chk:has(input:disabled){opacity:.65;cursor:not-allowed}
@@ -382,7 +415,7 @@ function nav_items(): array
         'Overview'       => ['dashboard' => ['Dashboard', null]],
         'Operations'     => ['deploy' => ['Deploy', 'deploy'], 'artisan' => ['Artisan', 'artisan'], 'terminal' => ['Terminal', 'terminal']],
         'Configuration'  => ['env' => ['Environment', 'env'], 'keys' => ['SSH keys', 'keys']],
-        'Administration' => ['users' => ['Users', 'admin'], 'security' => ['Security', 'admin'], 'settings' => ['Settings', 'admin'], 'audit' => ['Audit log', 'admin']],
+        'Administration' => ['projects' => ['Projects', 'admin'], 'users' => ['Users', 'admin'], 'security' => ['Security', 'admin'], 'settings' => ['Settings', 'admin'], 'audit' => ['Audit log', 'admin']],
     ];
 }
 
@@ -411,14 +444,31 @@ function layout_head(string $title, bool $nav = true): string
             }
         }
         $role = in_array('admin', $u['perm_list'] ?? [], true) ? 'Administrator' : 'Member';
+        $proj = current_project();
+        $plist = accessible_projects($u);
+        $switch = '';
+        if ($proj && count($plist) > 1) {
+            $opts = '';
+            foreach ($plist as $p) {
+                $opts .= '<option value="' . $p['id'] . '"' . ($p['id'] === $proj['id'] ? ' selected' : '') . '>' . h($p['name']) . '</option>';
+            }
+            $switch = '<form method="post" action="?a=project_switch" class="proj">' . csrf_field() . '<input type="hidden" name="return" value="' . h($cur) . '">'
+                . '<label class="proj-box" title="Switch project">' . icon('folder') . '<span class="proj-t"><small>Project</small>'
+                . '<select name="id" data-autosubmit aria-label="Switch project">' . $opts . '</select></span>' . icon('chevrons', 'proj-chev') . '</label>'
+                . '<noscript><button class="sm" type="submit" style="width:100%;margin-top:6px">Switch</button></noscript></form>';
+        } elseif ($proj) {
+            $switch = '<div class="proj"><div class="proj-box static">' . icon('folder') . '<span class="proj-t"><small>Project</small><b>' . h($proj['name']) . '</b></span>'
+                . (can('admin') ? '<a class="proj-add" href="?a=projects#new-project" title="Add another project">' . icon('plus') . '</a>' : '') . '</div></div>';
+        }
         $shell = '<div class="app"><aside class="side" id="side"><a class="brand" href="?a=dashboard">' . $logo
-            . '<span><b>DPLY</b><small>Deploy console</small></span></a><nav aria-label="Main">' . $navHtml . '</nav>'
+            . '<span><b>DPLY</b><small>Deploy console</small></span></a>' . $switch . '<nav aria-label="Main">' . $navHtml . '</nav>'
             . '<div class="side-foot"><a class="me' . ($cur === 'profile' ? ' on' : '') . '" href="?a=profile" title="Your profile">' . avatar($u['username'])
             . '<div><b>' . h($u['username']) . '</b><small>' . h($role) . '</small></div></a>'
             . '<div class="side-act"><button type="button" class="sm ghost" id="themeBtn" title="Toggle light / dark theme">' . icon('theme') . 'Theme</button>'
             . '<form method="post" action="?a=logout">' . csrf_field() . '<button class="sm ghost" type="submit">' . icon('logout') . 'Sign out</button></form></div></div></aside>'
             . '<div class="scrim" id="scrim"></div><div class="content"><header class="topbar"><button type="button" class="icon-btn ghost" id="navBtn" aria-label="Open menu">'
-            . icon('menu') . '</button><a class="brand" href="?a=dashboard">' . $logo . '<span><b>DPLY</b></span></a></header><main>';
+            . icon('menu') . '</button><a class="brand" href="?a=dashboard">' . $logo . '<span><b>DPLY</b></span></a>'
+            . ($proj ? '<span class="topbar-proj">' . icon('folder') . h($proj['name']) . '</span>' : '') . '</header><main>';
     } else {
         $shell = '<main class="bare"><div class="auth-brand">' . $logo . '<b>DPLY</b></div>';
     }
@@ -426,7 +476,7 @@ function layout_head(string $title, bool $nav = true): string
     $themeJs = "try{var t=localStorage.getItem('dply-theme');if(t)document.documentElement.setAttribute('data-theme',t);}catch(e){}";
     return '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
         . '<meta name="robots" content="noindex,nofollow"><meta name="color-scheme" content="light dark">'
-        . '<link rel="icon" href="data:image/svg+xml,' . rawurlencode('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#34d399"/><stop offset="1" stop-color="#22d3ee"/></linearGradient></defs><rect width="32" height="32" rx="8" fill="url(#g)"/><path d="M10 22l4-4m2-8c3-2 6-2 7-2 0 1 0 4-2 7l-5 4-4-4z" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>') . '"><title>' . h($title) . ' · DPLY</title>'
+        . '<link rel="icon" href="data:image/svg+xml,' . rawurlencode('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#34d399"/><stop offset="1" stop-color="#22d3ee"/></linearGradient></defs><rect width="32" height="32" rx="8" fill="url(#g)"/><path d="M10 22l4-4m2-8c3-2 6-2 7-2 0 1 0 4-2 7l-5 4-4-4z" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>') . '"><title>' . h($title) . (resolved_project_id() ? ' · ' . h(current_project()['name']) : '') . ' · DPLY</title>'
         . '<script nonce="' . $nonce . '">' . $themeJs . '</script><style>' . layout_css() . '</style></head>'
         . '<body' . ($u ? '' : ' class="auth"') . '>' . $shell;
 }
@@ -480,6 +530,8 @@ d.addEventListener('keydown',function(e){if(e.key==='Escape')d.body.classList.re
 d.querySelectorAll('[data-search]').forEach(function(inp){var sel=inp.getAttribute('data-search');inp.addEventListener('input',function(){var q=inp.value.toLowerCase().trim();
  d.querySelectorAll(sel).forEach(function(it){it.hidden=q!==''&&it.textContent.toLowerCase().indexOf(q)<0;});
  d.querySelectorAll('[data-group]').forEach(function(g){g.hidden=!g.querySelector(sel+':not([hidden])');});});});
+// Auto-submitting selects (project switcher)
+d.querySelectorAll('select[data-autosubmit]').forEach(function(s){s.addEventListener('change',function(){var f=s.form;if(f.requestSubmit){f.requestSubmit();}else{f.submit();}});});
 // Streaming pages: mark as finished
 var lv=$('live');if(lv){lv.classList.add('done');lv.lastChild.textContent='Finished';}
 })();
@@ -539,7 +591,7 @@ function stream_begin(string $title): void
         . ".observe(document.documentElement,{childList:true,subtree:true,characterData:true});";
     echo layout_head($title), '<script nonce="', csp_nonce(), '">', $js, '</script>',
         '<!--', str_repeat(' ', 2048), '-->',
-        page_head(h($title), 'Output streams live below — keep this tab open until it finishes.', '<span class="live" id="live"><i></i><span>Running…</span></span>'),
+        page_head(h($title), (resolved_project_id() ? current_project()['name'] . ' · ' : '') . 'Output streams live below — keep this tab open until it finishes.', '<span class="live" id="live"><i></i><span>Running…</span></span>'),
         '<pre class="log" id="log">';
     flush();
 }

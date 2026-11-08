@@ -144,7 +144,9 @@ function csrf_token(): string
 
 function csrf_field(): string
 {
-    return '<input type="hidden" name="_csrf" value="' . h(csrf_token()) . '">';
+    // _p pins the form to the project it was rendered for (see the stale-tab guard in dispatch()).
+    $pid = resolved_project_id();
+    return '<input type="hidden" name="_csrf" value="' . h(csrf_token()) . '">' . ($pid ? '<input type="hidden" name="_p" value="' . $pid . '">' : '');
 }
 
 function csrf_ok(): bool
@@ -269,6 +271,20 @@ function dispatch(): void
         return;
     }
 
+    $project = current_project();
+    // Stale-tab guard: a form rendered for project A must not act on project B after a switch in another tab.
+    $sentProject = $_POST['_p'] ?? $_SERVER['HTTP_X_DPLY_PROJECT'] ?? null;
+    if ($post && $sentProject !== null && !in_array($a, ['project_switch', 'logout', 'reauth'], true) && (int) $sentProject !== (int) ($project['id'] ?? 0)) {
+        $was = project_by_id((int) $sentProject);
+        $msg = 'This form was opened for project "' . ($was['name'] ?? '#' . (int) $sentProject) . '", but you have since switched to "'
+            . ($project['name'] ?? 'none') . '" (perhaps in another tab). Nothing was done — check the project and try again.';
+        if ($a === 'term_exec') {
+            json_out(['error' => $msg]);
+        }
+        flash('warn', $msg);
+        redirect('?a=' . $a);
+    }
+
     // action => [required permission, needs fresh password confirmation]
     $routes = [
         'dashboard'  => [null, false],
@@ -282,6 +298,8 @@ function dispatch(): void
         'users'      => ['admin', true],
         'security'   => ['admin', true],
         'settings'   => ['admin', true],
+        'projects'   => ['admin', true],
+        'project_switch' => [null, false],
         'audit'      => ['admin', false],
         'profile'    => [null, false],
         'reauth'     => [null, false],
@@ -294,6 +312,11 @@ function dispatch(): void
     if (!isset($routes[$a])) {
         http_response_code(404);
         render('Not found', '<div class="card">' . empty_state('search', 'This page does not exist.') . '<p style="text-align:center"><a class="btn" href="?a=dashboard">' . icon('back') . 'Back to dashboard</a></p></div>');
+        return;
+    }
+    if (!$project && !in_array($a, ['profile', 'reauth', 'logout'], true)) {
+        render('No project access', page_head('No projects available', 'You are signed in, but no project has been assigned to your account.')
+            . '<div class="card">' . empty_state('folder', 'Ask an administrator to give you access to a project.') . '</div>');
         return;
     }
     [$perm, $sudo] = $routes[$a];
@@ -321,4 +344,20 @@ function dispatch(): void
         return;
     }
     $fn();
+}
+
+function do_project_switch(): void
+{
+    $id = (int) ($_POST['id'] ?? 0);
+    $ret = (string) ($_POST['return'] ?? 'dashboard');
+    if (!preg_match('/^[a-z_]{1,32}$/', $ret) || in_array($ret, ['deploy_log', 'project_switch', 'logout', 'term_exec', 'reauth', 'login', 'login_2fa'], true)) {
+        $ret = $ret === 'deploy_log' ? 'deploy' : 'dashboard';
+    }
+    if (!user_can_project(current_user(), $id)) {
+        flash('err', 'You do not have access to that project.');
+        redirect('?a=dashboard');
+    }
+    use_project($id);
+    audit('project.switch', project_by_id($id)['slug']);
+    redirect('?a=' . $ret);
 }

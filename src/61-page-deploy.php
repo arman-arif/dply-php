@@ -21,7 +21,9 @@ function page_deploy(): void
         . '<pre class="small" style="margin-top:10px;max-height:220px">' . h(implode("\n", array_slice(explode("\n", $status), 0, 40))) . '</pre>'
         . '<p class="hint">With the "reset" strategy these tracked changes are overwritten on deploy.</p>';
 
-    $deps = db()->query('SELECT id, actor, kind, branch, status, commit_before, commit_after, started_at, finished_at FROM deployments ORDER BY id DESC LIMIT 30')->fetchAll();
+    $st = db()->prepare('SELECT id, actor, kind, branch, status, commit_before, commit_after, started_at, finished_at FROM deployments WHERE project_id = ? ORDER BY id DESC LIMIT 30');
+    $st->execute([current_project_id()]);
+    $deps = $st->fetchAll();
     $hist = '';
     foreach ($deps as $d) {
         $dur = $d['finished_at'] ? ((int) $d['finished_at'] - (int) $d['started_at']) . 's' : '…';
@@ -53,9 +55,9 @@ function page_deploy(): void
         $kvHtml .= '<dt>' . h($k) . '</dt><dd>' . $v . '</dd>';
     }
 
-    render('Deploy', page_head('Deploy', 'Pull the latest code from origin/' . $branch . ' and run your post-deploy steps.', $checkBtn)
+    render('Deploy', page_head('Deploy ' . h(current_project()['name']), 'Pull the latest code from origin/' . $branch . ' into ' . $root . ' and run your post-deploy steps.', $checkBtn)
         . '<div class="grid-main">'
-        . '<form method="post" action="?a=deploy" class="card" data-once data-confirm="Deploy origin/' . h($branch) . ' to this server now?">' . csrf_field()
+        . '<form method="post" action="?a=deploy" class="card" data-once data-confirm="Deploy origin/' . h($branch) . ' of ' . h(current_project()['name']) . ' now?">' . csrf_field()
         . '<input type="hidden" name="op" value="deploy"><h2>' . icon('deploy') . 'Deploy now</h2>'
         . '<ol class="pipeline"><li><b>Fetch</b>origin/' . h($branch) . '</li><li><b>Sync</b>update files</li><li><b>Run steps</b>selected below</li></ol>'
         . '<div class="sub-h" style="margin-top:0">Post-deploy steps</div>' . steps_checkboxes(default_steps())
@@ -119,8 +121,8 @@ function do_deploy(): void
         $target = null;
         $steps = $op === 'deploy' ? selected_steps((array) ($_POST['steps'] ?? [])) : default_steps();
         if ($op === 'rollback') {
-            $st = db()->prepare('SELECT commit_before FROM deployments WHERE id = ?');
-            $st->execute([(int) ($_POST['id'] ?? 0)]);
+            $st = db()->prepare('SELECT commit_before FROM deployments WHERE id = ? AND project_id = ?');
+            $st->execute([(int) ($_POST['id'] ?? 0), current_project_id()]);
             $target = (string) $st->fetchColumn();
             if (!preg_match('/^[0-9a-f]{40}$/', $target)) {
                 flash('err', 'That deployment has no commit to roll back to.');
@@ -141,6 +143,14 @@ function page_deploy_log(): void
     $st = db()->prepare('SELECT * FROM deployments WHERE id = ?');
     $st->execute([(int) ($_GET['id'] ?? 0)]);
     $d = $st->fetch();
+    if ($d && (int) $d['project_id'] !== current_project_id()) {
+        // Belongs to another project: follow it if allowed, so shared links keep working.
+        if (user_can_project(current_user(), (int) $d['project_id'])) {
+            use_project((int) $d['project_id']);
+        } else {
+            $d = null;
+        }
+    }
     if (!$d) {
         flash('err', 'Deployment not found.');
         redirect('?a=deploy');

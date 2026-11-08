@@ -159,7 +159,21 @@ Back this directory up, and never serve it over the web. It is in `.gitignore`.
 
 ## Development
 
-The source is split into modules in `src/`, which are compiled into the single deployable `public/index.php`. Modules are concatenated in filename order; `00-bootstrap.php` comes first and `99-run.php` last.
+The source is split into modules in `src/`, which are compiled into the single deployable `public/index.php`:
+
+```
+src/
+├── bootstrap.php   header + constants (always first)
+├── core/           storage, settings & crypto, projects, process runner
+├── security/       IP blocking, authentication
+├── web/            request handling, layout & rendering helpers
+├── deploy/         deployment engine
+├── pages/          one file per web page
+├── cli/            command-line interface
+└── run.php         entry point (always last)
+```
+
+Groups are concatenated in the order listed in `SRC_GROUPS` in `build.php`, files within a group by filename. Modules only declare constants and functions, so order inside a group doesn't matter. When adding a new folder, register it in `SRC_GROUPS`; the build fails on unknown folders or stray files.
 
 ```bash
 php build.php           # rebuild public/index.php (lints before writing)

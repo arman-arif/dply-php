@@ -1,0 +1,3 @@
+# Runtime data: sqlite.db, SSH keys, sessions, .env backups
+/data/
+/.index.php.build

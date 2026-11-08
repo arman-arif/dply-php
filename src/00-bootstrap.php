@@ -1,7 +1,7 @@
 <?php
 /**
  * ============================================================================
- *  DPLY — single-file deployment console for this Laravel application
+ *  DPLY — single-file deployment console for one or more Laravel applications
  * ============================================================================
  *  Purpose: fetch/pull updates from git into the project, then run the
  *  post-deployment artisan steps. Also: artisan runner, web terminal,
@@ -11,6 +11,12 @@
  *  FIRST RUN — on the server, as the user PHP runs as (e.g. www-data):
  *      sudo -u www-data php app/tool/dply/index.php setup
  *  Other CLI commands:   php app/tool/dply/index.php help
+ *
+ *  PROJECTS: one console can deploy several apps. Add them under Projects in
+ *  the web UI or with `project:add <slug> --root=/path`; pick one in the
+ *  sidebar, or pass --project=<slug> on the CLI (e.g. deploy --project=shop).
+ *  Repository, auth, steps and deploy history are per project; users,
+ *  security, binaries and the SSH key pool are shared.
  *
  *  Security layers, in order:
  *      optional IP allow-list → automatic IP blocking (escalating) →
@@ -28,7 +34,7 @@
  */
 declare(strict_types=1);
 
-define('DPLY_VERSION', '1.0.0');
+define('DPLY_VERSION', '1.1.0');
 define('DPLY_DIR', __DIR__);
 define('DPLY_DATA', rtrim((string) (getenv('DPLY_DATA_DIR') ?: __DIR__ . '/data'), '/'));
 define('DPLY_DB', DPLY_DATA . '/sqlite.db');
@@ -55,7 +61,7 @@ const DPLY_STEPS = [
     'view_cache'     => 'artisan view:cache',
     'event_cache'    => 'artisan event:cache',
     'queue_restart'  => 'artisan queue:restart',
-    'custom'         => 'Custom post-deploy commands (Settings)',
+    'custom'         => 'Custom post-deploy commands (project settings)',
     'opcache'        => 'Reset PHP OPcache',
     'up'             => 'Maintenance mode OFF (artisan up)',
 ];

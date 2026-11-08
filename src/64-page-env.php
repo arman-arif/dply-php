@@ -70,7 +70,7 @@ function env_parse_simple(string $content): array
 
 function env_backups(): array
 {
-    $files = glob(DPLY_DATA . '/env-backups/env-*') ?: [];
+    $files = glob(env_backup_dir() . '/env-*') ?: [];
     rsort($files);
     return $files;
 }
@@ -84,7 +84,7 @@ function page_env(): void
     $note = '';
     if (isset($_GET['load'])) {
         $b = basename((string) $_GET['load']);
-        $bf = DPLY_DATA . '/env-backups/' . $b;
+        $bf = env_backup_dir() . '/' . $b;
         if (preg_match('/^env-[0-9]{8}-[0-9]{6}-[a-f0-9]{6}$/', $b) && is_file($bf)) {
             $content = (string) file_get_contents($bf);
             $note = '<div class="flash warn">Backup <code>' . h($b) . '</code> loaded into the editor — review it and press Save to restore it.</div>';
@@ -141,7 +141,7 @@ function do_env(): void
         redirect('?a=env');
     }
     if ($old !== null) {
-        $bf = DPLY_DATA . '/env-backups/env-' . date('Ymd-His') . '-' . bin2hex(random_bytes(3));
+        $bf = env_backup_dir() . '/env-' . date('Ymd-His') . '-' . bin2hex(random_bytes(3));
         file_put_contents($bf, $old, LOCK_EX);
         @chmod($bf, 0600);
         foreach (array_slice(env_backups(), 50) as $extra) {

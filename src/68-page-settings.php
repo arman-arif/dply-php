@@ -16,7 +16,11 @@ function page_settings(): void
     foreach ($keys as $k) {
         $keyOpts .= '<option value="' . h($k) . '"' . (setting('ssh_key') === $k ? ' selected' : '') . '>' . h($k) . '</option>';
     }
-    render('Settings', page_head('Settings', 'Where the code comes from, how it is synced, and which tools run it.') . '<form method="post" action="?a=settings">' . csrf_field() . '<div class="grid">'
+    $pname = current_project()['name'];
+    render('Settings', page_head('Settings', 'Project settings apply only to ' . $pname . '. Global settings are shared by every project.',
+        can('admin') ? '<a class="btn" href="?a=projects">' . icon('folder') . 'All projects</a>' : '')
+        . '<form method="post" action="?a=settings">' . csrf_field()
+        . '<div class="sub-h" style="margin-top:0">' . icon('folder') . ' Project · ' . h($pname) . '</div><div class="grid">'
         . '<div class="card"><h2>' . icon('branch') . 'Repository</h2>'
         . '<label><span>Project root (the Laravel app to deploy)</span><input type="text" name="project_root" value="' . $s('project_root') . '" required></label>'
         . '<label><span>Repository URL — https://… for token auth, git@host:org/repo.git for SSH. Empty = keep existing origin.</span>'
@@ -28,6 +32,7 @@ function page_settings(): void
         . '<label><span>Access token ' . ($hasTok ? badge('stored (encrypted)', 'ok') : '') . ' — leave blank to keep</span><input type="password" name="git_token" autocomplete="off" placeholder="' . ($hasTok ? '••••••••' : 'ghp_… / glpat-…') . '"></label>'
         . ($hasTok ? '<label class="chk"><input type="checkbox" name="clear_token" value="1"><span>Remove stored token</span></label>' : '')
         . '<label><span>SSH key (manage under SSH keys)</span><select name="ssh_key">' . $keyOpts . '</select></label>'
+        . '<label><span>PHP CLI binary for this project — empty = auto (' . h(php_bin_auto()) . ')</span><input type="text" name="php_bin" value="' . $s('php_bin') . '" placeholder="/usr/bin/php8.3"></label>'
         . '</div>'
         . '<div class="card"><h2>' . icon('sync') . 'Sync behaviour</h2>'
         . '<label><span>Strategy</span><select name="sync_strategy"><option value="reset"' . $sel('sync_strategy', 'reset') . '>Force-sync: make tracked files identical to origin (recommended)</option>'
@@ -39,8 +44,8 @@ function page_settings(): void
         . '<textarea name="custom_commands" rows="4">' . $s('custom_commands') . '</textarea></label>'
         . '<label><span>Maintenance bypass secret (artisan down --secret) — optional</span><input type="text" name="maint_secret" value="' . $s('maint_secret') . '" pattern="[A-Za-z0-9_-]*"></label>'
         . '</div>'
+        . '</div><div class="sub-h">' . icon('settings') . ' Global · all projects</div><div class="grid">'
         . '<div class="card"><h2>' . icon('terminal') . 'Binaries &amp; limits</h2>'
-        . '<label><span>PHP CLI binary — empty = auto (' . h(php_bin()) . ')</span><input type="text" name="php_bin" value="' . $s('php_bin') . '"></label>'
         . '<label><span>Composer — command name or path to composer.phar</span><input type="text" name="composer_bin" value="' . $s('composer_bin') . '"></label>'
         . '<label><span>Git binary</span><input type="text" name="git_bin" value="' . $s('git_bin') . '"></label>'
         . '<label><span>Per-command timeout (seconds)</span><input type="number" name="cmd_timeout" min="30" value="' . $s('cmd_timeout') . '"></label>'
@@ -55,27 +60,18 @@ function do_settings(): void
     $op = (string) ($_POST['op'] ?? 'save');
     $errs = [];
     $root = rtrim(trim((string) ($_POST['project_root'] ?? '')), '/');
-    $real = $root !== '' ? realpath($root) : false;
-    if ($real === false || !is_dir($real)) {
-        $errs[] = 'Project root does not exist.';
+    [$real, $e] = project_root_check($root, current_project_id());
+    if ($e) {
+        $errs[] = $e;
     }
     $url = trim((string) ($_POST['repo_url'] ?? ''));
     $auth = in_array($_POST['git_auth'] ?? '', ['none', 'token', 'ssh'], true) ? (string) $_POST['git_auth'] : 'none';
-    if ($url !== '') {
-        $parts = parse_url($url);
-        if ($url[0] === '-' || preg_match('/\s/', $url)) {
-            $errs[] = 'Invalid repository URL.';
-        } elseif (preg_match('#^https?://#i', $url) && (isset($parts['user']) || isset($parts['pass']))) {
-            $errs[] = 'Do not embed credentials in the URL — use the token field instead.';
-        } elseif ($auth === 'token' && !preg_match('#^https://#i', $url)) {
-            $errs[] = 'Token authentication requires an https:// URL.';
-        } elseif ($auth === 'ssh' && preg_match('#^https?://#i', $url)) {
-            $errs[] = 'SSH authentication requires an SSH URL (git@host:org/repo.git or ssh://…).';
-        }
+    if ($e = repo_url_error($url, $auth)) {
+        $errs[] = $e;
     }
     $branch = trim((string) ($_POST['branch'] ?? ''));
-    if (!preg_match('#^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$#', $branch) || str_contains($branch, '..') || str_ends_with($branch, '.lock')) {
-        $errs[] = 'Invalid branch name.';
+    if ($e = branch_error($branch)) {
+        $errs[] = $e;
     }
     $tokUser = trim((string) ($_POST['git_token_user'] ?? '')) ?: 'x-access-token';
     if (str_contains($tokUser, ':')) {
@@ -123,7 +119,7 @@ function do_settings(): void
     set_setting('git_bin', trim((string) ($_POST['git_bin'] ?? '')) ?: 'git');
     set_setting('cmd_timeout', (string) max(30, (int) ($_POST['cmd_timeout'] ?? 900)));
     set_setting('term_allow', str_replace("\r\n", "\n", trim((string) ($_POST['term_allow'] ?? ''))));
-    audit('settings.save', "repo=$url branch=$branch auth=$auth" . ($tok !== '' ? ' (token updated)' : '') . (!empty($_POST['clear_token']) ? ' (token removed)' : ''));
+    audit('settings.save', current_project()['slug'] . ": repo=$url branch=$branch auth=$auth" . ($tok !== '' ? ' (token updated)' : '') . (!empty($_POST['clear_token']) ? ' (token removed)' : ''));
 
     if ($op === 'test_git') {
         $target = $url !== '' ? $url : (string) git_out(['remote', 'get-url', 'origin']);
@@ -141,4 +137,46 @@ function do_settings(): void
         flash('ok', 'Settings saved.');
     }
     redirect('?a=settings');
+}
+
+/** Returns [realpath|null, error|null] for a project root; it must exist and not belong to another project. */
+function project_root_check(string $root, int $exceptProjectId = 0): array
+{
+    $real = $root !== '' ? realpath($root) : false;
+    if ($real === false || !is_dir($real)) {
+        return [null, 'Project root does not exist.'];
+    }
+    if ($other = project_using_root($real, $exceptProjectId)) {
+        return [null, 'That directory is already used by project "' . $other['name'] . '".'];
+    }
+    return [$real, null];
+}
+
+function repo_url_error(string $url, string $auth): ?string
+{
+    if ($url === '') {
+        return null;
+    }
+    $parts = parse_url($url);
+    if ($url[0] === '-' || preg_match('/\s/', $url)) {
+        return 'Invalid repository URL.';
+    }
+    if (preg_match('#^https?://#i', $url) && (isset($parts['user']) || isset($parts['pass']))) {
+        return 'Do not embed credentials in the URL — use the token field instead.';
+    }
+    if ($auth === 'token' && !preg_match('#^https://#i', $url)) {
+        return 'Token authentication requires an https:// URL.';
+    }
+    if ($auth === 'ssh' && preg_match('#^https?://#i', $url)) {
+        return 'SSH authentication requires an SSH URL (git@host:org/repo.git or ssh://…).';
+    }
+    return null;
+}
+
+function branch_error(string $branch): ?string
+{
+    if (!preg_match('#^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$#', $branch) || str_contains($branch, '..') || str_ends_with($branch, '.lock')) {
+        return 'Invalid branch name.';
+    }
+    return null;
 }

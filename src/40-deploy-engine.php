@@ -30,9 +30,9 @@ function repo_rel_path(string $abs): ?string
  */
 function deploy_run(string $actor, array $steps, ?string $rollbackTo = null, ?callable $echo = null): array
 {
-    $lock = fopen(DPLY_DATA . '/deploy.lock', 'c');
+    $lock = fopen(deploy_lock_file(), 'c');
     if (!$lock || !flock($lock, LOCK_EX | LOCK_NB)) {
-        return ['ok' => false, 'id' => 0, 'msg' => 'Another deployment is already running.'];
+        return ['ok' => false, 'id' => 0, 'msg' => 'Another deployment of this project is already running.'];
     }
     @set_time_limit(0);
     ignore_user_abort(true);
@@ -40,10 +40,10 @@ function deploy_run(string $actor, array $steps, ?string $rollbackTo = null, ?ca
     $pdo = db();
     $root = project_root();
     $branch = setting('branch');
-    $pdo->prepare('INSERT INTO deployments (actor, kind, branch, status, steps, started_at, log) VALUES (?, ?, ?, ?, ?, ?, ?)')
-        ->execute([$actor, $rollbackTo ? 'rollback' : 'deploy', $branch, 'running', implode(',', $steps), time(), '']);
+    $pdo->prepare('INSERT INTO deployments (actor, kind, branch, status, steps, started_at, log, project_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+        ->execute([$actor, $rollbackTo ? 'rollback' : 'deploy', $branch, 'running', implode(',', $steps), time(), '', current_project_id()]);
     $id = (int) $pdo->lastInsertId();
-    audit($rollbackTo ? 'deploy.rollback' : 'deploy.start', "#$id " . ($rollbackTo ? "to $rollbackTo" : "branch $branch"), $actor);
+    audit($rollbackTo ? 'deploy.rollback' : 'deploy.start', "#$id " . (current_project()['slug'] ?? '') . ' ' . ($rollbackTo ? "to $rollbackTo" : "branch $branch"), $actor);
 
     $log = '';
     $L = function (?string $s) use (&$log, $echo): void {

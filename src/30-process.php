@@ -33,9 +33,12 @@ function find_bin(string $name): ?string
 function php_bin(): string
 {
     $s = trim(setting('php_bin'));
-    if ($s !== '') {
-        return $s;
-    }
+    return $s !== '' ? $s : php_bin_auto();
+}
+
+/** Best-guess PHP CLI binary matching the PHP version running DPLY. */
+function php_bin_auto(): string
+{
     $c = [];
     if (PHP_BINARY !== '' && !preg_match('/fpm|cgi|apache|httpd|litespeed|lsphp|frankenphp/i', basename(PHP_BINARY))) {
         $c[] = PHP_BINARY;

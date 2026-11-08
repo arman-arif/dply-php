@@ -33,6 +33,46 @@ function perm_checkboxes(array $selected, bool $disableAdmin = false): string
     return $o;
 }
 
+/** "All projects" vs "Only these" picker. $stored: '' = all, else comma list of ids ('0' = none). */
+function project_access_field(string $stored, bool $isAdmin): string
+{
+    $all = projects_all();
+    if (count($all) < 2 && trim($stored) === '') {
+        return '';
+    }
+    $ids = trim($stored) === '' ? null : array_map('intval', explode(',', $stored));
+    $o = '<div class="sub-h">Project access</div><div class="access">'
+        . '<label class="chk"><input type="radio" name="access" value="all"' . ($ids === null ? ' checked' : '') . '><span><b style="font-weight:600">All projects</b>'
+        . '<br><span class="mute small">Including projects added later</span></span></label>'
+        . '<label class="chk" style="margin-top:6px"><input type="radio" name="access" value="some"' . ($ids !== null ? ' checked' : '') . '><span><b style="font-weight:600">Only selected projects</b></span></label>'
+        . '<div class="chks">';
+    foreach ($all as $p) {
+        $o .= '<label class="chk"><input type="checkbox" name="projects[]" value="' . $p['id'] . '"' . ($ids !== null && in_array($p['id'], $ids, true) ? ' checked' : '')
+            . '><span>' . h($p['name']) . ' <span class="mute small">' . h($p['slug']) . '</span></span></label>';
+    }
+    return $o . '</div>' . ($isAdmin ? '<p class="hint">Administrators can always open every project; this only applies if admin is removed.</p>' : '') . '</div>';
+}
+
+function projects_from_post(): string
+{
+    if (($_POST['access'] ?? 'all') !== 'some') {
+        return '';
+    }
+    $ids = array_values(array_filter(array_map('intval', (array) ($_POST['projects'] ?? [])), fn($id) => project_by_id($id) !== null));
+    return $ids ? implode(',', $ids) : '0';
+}
+
+function project_access_summary(array $u): string
+{
+    $ids = user_project_ids($u);
+    if ($ids === null) {
+        return count(projects_all()) > 1 ? badge('all projects') : '';
+    }
+    $names = array_map(fn($id) => project_by_id($id)['name'] ?? null, $ids);
+    $names = array_values(array_filter($names));
+    return $names ? badge(count($names) === 1 ? $names[0] : count($names) . ' projects') : badge('no projects', 'warn');
+}
+
 function page_users(): void
 {
     $me = current_user();
@@ -46,7 +86,7 @@ function page_users(): void
         $hid = csrf_field() . '<input type="hidden" name="id" value="' . $id . '">';
         $html .= '<div class="card"><div class="ucard-h">' . avatar((string) $u['username']) . '<div class="n"><b>' . h($u['username']) . ' '
             . ((int) $u['active'] ? badge('active', 'ok') : badge('disabled', 'err')) . ($u['totp_secret'] ? badge('2FA', 'ok') : '')
-            . ($locked ? badge('locked until ' . date('H:i', (int) $u['locked_until']), 'err') : '') . ($self ? badge('you') : '') . '</b>'
+            . ($locked ? badge('locked until ' . date('H:i', (int) $u['locked_until']), 'err') : '') . ($self ? badge('you') : '') . project_access_summary($u) . '</b>'
             . '<small>Last login ' . ($u['last_login_at'] ? ago((int) $u['last_login_at']) : 'never') . ($u['last_login_ip'] ? ' from ' . h($u['last_login_ip']) : '') . '</small></div>'
             . '<div class="row">'
             . ($locked || (int) $u['failed_count'] ? '<form method="post" action="?a=users">' . $hid . '<input type="hidden" name="op" value="unlock"><button class="sm" type="submit">' . icon('lock') . 'Unlock</button></form>' : '')
@@ -58,13 +98,15 @@ function page_users(): void
             . '<div class="sub-h" style="margin-top:0">Permissions</div><div class="chks">' . perm_checkboxes($perms, $self)
             . '<label class="chk"><input type="checkbox" name="active" value="1"' . ((int) $u['active'] ? ' checked' : '') . ($self ? ' disabled' : '') . '><span><b style="font-weight:600">Account enabled</b><br><span class="mute small">Disabled accounts cannot sign in</span></span></label></div>'
             . ($self ? '<input type="hidden" name="active" value="1">' : '')
+            . project_access_field((string) $u['projects'], in_array('admin', $perms, true))
             . '<button type="submit">' . icon('check') . 'Save permissions</button></form>'
             . '<form method="post" action="?a=users">' . $hid . '<input type="hidden" name="op" value="password"><div class="sub-h" style="margin-top:0">Reset password</div>'
             . '<label><span>New password (min 12 characters)</span><input type="password" name="password" autocomplete="new-password" required minlength="12"></label>'
             . '<button type="submit">' . icon('lock') . 'Set password</button></form></div></div>';
     }
     $html .= '<form method="post" action="?a=users" class="card" id="add-user">' . csrf_field() . '<h2>' . icon('plus') . 'Add user</h2><input type="hidden" name="op" value="create">'
-        . '<div class="grid-main" style="margin-bottom:6px"><div><div class="sub-h" style="margin-top:0">Permissions</div><div class="chks">' . perm_checkboxes(['deploy']) . '</div></div>'
+        . '<div class="grid-main" style="margin-bottom:6px"><div><div class="sub-h" style="margin-top:0">Permissions</div><div class="chks">' . perm_checkboxes(['deploy']) . '</div>'
+        . project_access_field('', false) . '</div>'
         . '<div><div class="sub-h" style="margin-top:0">Credentials</div><label><span>Username</span><input type="text" name="username" pattern="[A-Za-z0-9_.@-]{3,64}" required placeholder="jane.doe"></label>'
         . '<label><span>Password (min 12 characters)</span><input type="password" name="password" autocomplete="new-password" required minlength="12"></label>'
         . '<button class="primary" type="submit">' . icon('plus') . 'Create user</button></div></div></form>';
@@ -99,8 +141,8 @@ function do_users(): void
             } elseif (find_user($u)) {
                 flash('err', 'That username exists.');
             } else {
-                $pdo->prepare('INSERT INTO users (username, password_hash, perms, created_at) VALUES (?, ?, ?, ?)')->execute([$u, hash_pw($p), perms_from_post(), time()]);
-                audit('users.create', "$u [" . perms_from_post() . ']');
+                $pdo->prepare('INSERT INTO users (username, password_hash, perms, created_at, projects) VALUES (?, ?, ?, ?, ?)')->execute([$u, hash_pw($p), perms_from_post(), time(), projects_from_post()]);
+                audit('users.create', "$u [" . perms_from_post() . '] projects=[' . (projects_from_post() ?: 'all') . ']');
                 flash('ok', "User $u created.");
             }
             break;
@@ -118,9 +160,10 @@ function do_users(): void
                 flash('err', 'Cannot remove the last active administrator.');
                 break;
             }
-            $pdo->prepare('UPDATE users SET perms = ?, active = ?, session_version = session_version + (CASE WHEN active != ? THEN 1 ELSE 0 END) WHERE id = ?')
-                ->execute([$perms, $active, $active, $id]);
-            audit('users.update', "{$target['username']}: perms=[$perms] active=$active");
+            $projects = projects_from_post();
+            $pdo->prepare('UPDATE users SET perms = ?, active = ?, projects = ?, session_version = session_version + (CASE WHEN active != ? THEN 1 ELSE 0 END) WHERE id = ?')
+                ->execute([$perms, $active, $projects, $active, $id]);
+            audit('users.update', "{$target['username']}: perms=[$perms] active=$active projects=[" . ($projects ?: 'all') . ']');
             flash('ok', "Saved {$target['username']}.");
             break;
         case 'password':

@@ -23,8 +23,46 @@ function cli_main(array $argv): int
             $opts[$m[1]] = $m[2] ?? true;
         }
     }
+    if (isset($opts['project'])) {
+        $p = is_string($opts['project']) ? project_by_ref($opts['project']) : null;
+        if (!$p) {
+            fwrite(STDERR, "Unknown project '" . (is_string($opts['project']) ? $opts['project'] : '') . "'. Run: php index.php projects\n");
+            return 1;
+        }
+        use_project($p['id']);
+    }
     $code = 0;
     switch ($cmd) {
+        case 'projects':
+            foreach (projects_all() as $p) {
+                $last = project_last_deploy($p['id']);
+                printf("%-20s %-28s %-12s %s\n", $p['slug'], mb_strimwidth($p['name'], 0, 28, '…'), project_setting($p['id'], 'branch'),
+                    project_setting($p['id'], 'project_root') . ($last ? "  (last deploy: {$last['status']} " . date('Y-m-d H:i', (int) $last['started_at']) . ')' : ''));
+            }
+            break;
+        case 'project:add':
+            $slug = strtolower((string) $arg);
+            $root = is_string($opts['root'] ?? null) ? rtrim($opts['root'], '/') : '';
+            $name = is_string($opts['name'] ?? null) ? trim($opts['name']) : $slug;
+            $branch = is_string($opts['branch'] ?? null) ? $opts['branch'] : 'main';
+            $repo = is_string($opts['repo'] ?? null) ? trim($opts['repo']) : '';
+            [$real, $rootErr] = project_root_check($root);
+            $err = !valid_slug($slug) ? 'Usage: project:add <slug> --root=/path [--name="Name"] [--branch=main] [--repo=URL]  (slug: a-z, 0-9, -)'
+                : (project_by_ref($slug) ? "Project '$slug' already exists." : ($rootErr ?? branch_error($branch) ?? repo_url_error($repo, 'none')));
+            if ($err) {
+                echo $err . "\n";
+                $code = 1;
+                break;
+            }
+            db()->prepare('INSERT INTO projects (slug, name, created_at) VALUES (?, ?, ?)')->execute([$slug, $name !== '' ? $name : $slug, time()]);
+            $pid = (int) db()->lastInsertId();
+            projects_changed();
+            foreach (['project_root' => (string) $real, 'branch' => $branch, 'repo_url' => $repo] as $k => $v) {
+                set_project_setting($pid, $k, $v);
+            }
+            audit('project.create', "$slug root=$real", 'cli', 'cli');
+            echo "✔ Project '$slug' added. Configure auth and steps in the web console, or deploy with: deploy --project=$slug\n";
+            break;
         case 'setup':
             if (setup_done() && empty($opts['force'])) {
                 echo "Already set up. Use http:set, user:add, user:password (or setup --force).\n";
@@ -39,6 +77,10 @@ function cli_main(array $argv): int
                     return 1;
                 }
                 set_setting('project_root', (string) realpath($root));
+                if (count(projects_all()) === 1 && ($name = basename((string) realpath($root))) !== '') {
+                    db()->prepare('UPDATE projects SET name = ?, slug = ? WHERE id = ?')->execute([$name, slugify($name) ?: 'default', current_project_id()]);
+                    projects_changed();
+                }
             }
             echo "\n-- HTTP Basic auth (outer gate) --\n";
             if (!cli_set_http()) {
@@ -148,7 +190,7 @@ function cli_main(array $argv): int
                     echo $s;
                 }
             });
-            echo "\n" . $r['msg'] . ($r['id'] ? " (#{$r['id']})" : '') . "\n";
+            echo "\n[" . (current_project()['slug'] ?? '?') . '] ' . $r['msg'] . ($r['id'] ? " (#{$r['id']})" : '') . "\n";
             $code = $r['ok'] ? 0 : 1;
             break;
         default:
@@ -165,7 +207,12 @@ DPLY {$GLOBALS['argv'][0]} — commands:
   blocks                   List currently blocked IPs
   unblock <ip>|--all       Remove IP blocks
   allowlist:clear          Remove the IP allow-list (if you locked yourself out)
+  projects                 List projects
+  project:add <slug> --root=/path [--name="Name"] [--branch=main] [--repo=URL]
   deploy [--steps=a,b,c]   Run a deployment from the command line
+
+Project-specific commands (deploy) act on the first project unless you pass
+--project=<slug>, e.g.: php index.php deploy --project=shop-api
 
 Run as the same user PHP-FPM/Apache uses, e.g.: sudo -u www-data php index.php setup
 

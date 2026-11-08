@@ -10,25 +10,26 @@ function page_audit(): void
 {
     $q = trim((string) ($_GET['q'] ?? ''));
     if ($q !== '') {
-        $st = db()->prepare("SELECT * FROM audit WHERE action LIKE ? OR actor LIKE ? OR ip LIKE ? OR detail LIKE ? ORDER BY id DESC LIMIT 500");
+        $st = db()->prepare("SELECT a.*, p.name AS project FROM audit a LEFT JOIN projects p ON p.id = a.project_id"
+            . " WHERE a.action LIKE ? OR a.actor LIKE ? OR a.ip LIKE ? OR a.detail LIKE ? OR p.name LIKE ? ORDER BY a.id DESC LIMIT 500");
         $like = '%' . str_replace(['%', '_'], ['\%', '\_'], $q) . '%';
-        $st->execute([$like, $like, $like, $like]);
+        $st->execute([$like, $like, $like, $like, $like]);
         $rows = $st->fetchAll();
     } else {
-        $rows = db()->query('SELECT * FROM audit ORDER BY id DESC LIMIT 500')->fetchAll();
+        $rows = db()->query('SELECT a.*, p.name AS project FROM audit a LEFT JOIN projects p ON p.id = a.project_id ORDER BY a.id DESC LIMIT 500')->fetchAll();
     }
     $html = '';
     foreach ($rows as $r) {
         $cls = str_starts_with($r['action'], 'auth.fail') || str_starts_with($r['action'], 'security.block') || str_ends_with($r['action'], 'denied') ? 'err'
             : (str_starts_with($r['action'], 'deploy') ? 'ok' : '');
-        $html .= '<tr class="r"><td class="small" style="white-space:nowrap">' . ago((int) $r['created_at']) . '</td><td style="white-space:nowrap">' . h($r['actor']) . '</td><td><code>' . h($r['ip']) . '</code></td><td>'
+        $html .= '<tr class="r"><td class="small" style="white-space:nowrap">' . ago((int) $r['created_at']) . '</td><td style="white-space:nowrap">' . h($r['actor']) . '</td><td><code>' . h($r['ip']) . '</code></td><td class="small" style="white-space:nowrap">' . h($r['project'] ?? '—') . '</td><td>'
             . badge($r['action'], $cls) . '</td><td class="small">' . h($r['detail']) . '</td></tr>';
     }
     render('Audit log', page_head('Audit log', 'Every sign-in, deployment, command and setting change — newest first (up to 500 entries).')
         . '<form method="get" class="row" style="margin-bottom:18px"><input type="hidden" name="a" value="audit"><div class="searchbox">' . icon('search')
-        . '<input type="text" name="q" value="' . h($q) . '" data-search="#audit-rows tr.r" placeholder="Search action, user, IP or detail — Enter searches the full log" aria-label="Search audit log"></div>'
+        . '<input type="text" name="q" value="' . h($q) . '" data-search="#audit-rows tr.r" placeholder="Search action, user, IP, project or detail — Enter searches the full log" aria-label="Search audit log"></div>'
         . '<button type="submit">Search</button>' . ($q !== '' ? '<a class="btn ghost" href="?a=audit">' . icon('x') . 'Clear</a>' : '') . '</form>'
-        . ($html !== '' ? '<div class="card tbl"><table id="audit-rows"><tr><th>When</th><th>User</th><th>IP</th><th>Action</th><th>Detail</th></tr>' . $html . '</table></div>'
+        . ($html !== '' ? '<div class="card tbl"><table id="audit-rows"><tr><th>When</th><th>User</th><th>IP</th><th>Project</th><th>Action</th><th>Detail</th></tr>' . $html . '</table></div>'
             : '<div class="card">' . empty_state('search', $q !== '' ? 'No entries match "' . $q . '".' : 'The audit log is empty.') . '</div>'));
 }
 

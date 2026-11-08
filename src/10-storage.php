@@ -86,6 +86,7 @@ function db(): PDO
         );
         CREATE INDEX IF NOT EXISTS audit_time ON audit (created_at);
         SQL);
+    db_migrate($pdo);
     return $pdo;
 }
 
@@ -139,13 +140,26 @@ function settings_all(): array
     return $cache;
 }
 
+/** Global setting, or — for keys in DPLY_PROJECT_KEYS — the current project's value. */
 function setting(string $k): string
 {
+    if (is_project_key($k)) {
+        $p = current_project();
+        return $p ? project_setting($p['id'], $k) : (string) (setting_defaults()[$k] ?? '');
+    }
     return (string) (settings_all()[$k] ?? '');
 }
 
 function set_setting(string $k, string $v): void
 {
+    if (is_project_key($k)) {
+        $p = current_project();
+        if (!$p) {
+            throw new RuntimeException("No current project to store '$k' in.");
+        }
+        set_project_setting($p['id'], $k, $v);
+        return;
+    }
     db()->prepare('INSERT INTO settings (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v')->execute([$k, $v]);
     $GLOBALS['__dply_settings_dirty'] = true;
 }
@@ -234,6 +248,12 @@ function audit(string $action, string $detail = '', ?string $actor = null, ?stri
         $u = PHP_SAPI === 'cli' ? null : current_user();
         $actor = $u['username'] ?? (PHP_SAPI === 'cli' ? 'cli' : '-');
     }
-    db()->prepare('INSERT INTO audit (actor, ip, action, detail, created_at) VALUES (?, ?, ?, ?, ?)')
-        ->execute([$actor, $ip ?? (PHP_SAPI === 'cli' ? 'cli' : client_ip()), $action, substr($detail, 0, 2000), time()]);
+    db()->prepare('INSERT INTO audit (actor, ip, action, detail, created_at, project_id) VALUES (?, ?, ?, ?, ?, ?)')
+        ->execute([$actor, $ip ?? (PHP_SAPI === 'cli' ? 'cli' : client_ip()), $action, substr($detail, 0, 2000), time(), audit_project_id($action)]);
+}
+
+/** Only actions that act on a project are tagged with it; global ones (users, security, auth) are not. */
+function audit_project_id(string $action): ?int
+{
+    return preg_match('/^(deploy|artisan|terminal|env|settings|project)\.|^keys\.activate$/', $action) ? resolved_project_id() : null;
 }

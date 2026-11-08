@@ -33,17 +33,25 @@ function list_keys(): array
 function page_keys(): void
 {
     $active = setting('ssh_key');
-    $html = page_head('SSH keys', 'Add a key\'s public part to your repository as a read-only deploy key, mark it active, and set Git auth to ssh in Settings.');
+    $pname = current_project()['name'];
+    $usedBy = [];
+    foreach (projects_all() as $p) {
+        if (($k = project_setting($p['id'], 'ssh_key')) !== '') {
+            $usedBy[$k][] = $p['name'];
+        }
+    }
+    $html = page_head('SSH keys', 'Keys are shared by all projects; each project picks the one it uses. Add a key\'s public part to the repository as a read-only deploy key.');
     if (!find_bin('ssh-keygen')) {
         $html .= '<div class="flash err">ssh-keygen was not found in PATH — install openssh-client.</div>';
     }
     $keysHtml = '';
     foreach (list_keys() as $name => $k) {
         $isActive = $name === $active;
-        $keysHtml .= '<div class="card"><div class="ucard-h"><div class="key-ic' . ($isActive ? ' on' : '') . '">' . icon('keys') . '</div><div class="n"><b>' . h($name) . ' ' . ($isActive ? badge('active for git', 'ok') : '') . '</b>'
-            . '<small><code>' . h($k['fp']) . '</code> · created ' . ago($k['mtime']) . '</small></div><div class="row">'
-            . ($isActive ? '' : '<form method="post" action="?a=keys">' . csrf_field() . '<input type="hidden" name="op" value="activate"><input type="hidden" name="name" value="' . h($name) . '"><button class="sm" type="submit">' . icon('check') . 'Use for git</button></form>')
-            . '<form method="post" action="?a=keys" data-confirm="Delete key ' . h($name) . ' permanently?">' . csrf_field() . '<input type="hidden" name="op" value="delete"><input type="hidden" name="name" value="' . h($name) . '"><button class="sm danger" type="submit">Delete</button></form>'
+        $others = array_values(array_diff($usedBy[$name] ?? [], [$pname]));
+        $keysHtml .= '<div class="card"><div class="ucard-h"><div class="key-ic' . ($isActive ? ' on' : '') . '">' . icon('keys') . '</div><div class="n"><b>' . h($name) . ' ' . ($isActive ? badge('used by ' . $pname, 'ok') : '') . '</b>'
+            . '<small><code>' . h($k['fp']) . '</code> · created ' . ago($k['mtime']) . ($others ? ' · also used by ' . h(implode(', ', $others)) : '') . '</small></div><div class="row">'
+            . ($isActive ? '' : '<form method="post" action="?a=keys">' . csrf_field() . '<input type="hidden" name="op" value="activate"><input type="hidden" name="name" value="' . h($name) . '"><button class="sm" type="submit">' . icon('check') . 'Use for ' . h($pname) . '</button></form>')
+            . '<form method="post" action="?a=keys" data-confirm="Delete key ' . h($name) . ' permanently?' . (!empty($usedBy[$name]) ? ' It is used by: ' . h(implode(', ', $usedBy[$name])) . '.' : '') . '">' . csrf_field() . '<input type="hidden" name="op" value="delete"><input type="hidden" name="name" value="' . h($name) . '"><button class="sm danger" type="submit">Delete</button></form>'
             . '</div></div><label style="margin:0"><span>Public key — paste this into your repository\'s deploy keys</span><textarea rows="3" readonly>' . h($k['pub']) . '</textarea></label></div>';
     }
     $html .= $keysHtml !== '' ? $keysHtml : '<div class="card">' . empty_state('keys', 'No SSH keys yet. Generate one below or import an existing key.') . '</div>';
@@ -116,8 +124,10 @@ function do_keys(): void
             if (valid_key_name($name) && is_file("$dir/$name")) {
                 @unlink("$dir/$name");
                 @unlink("$dir/$name.pub");
-                if (setting('ssh_key') === $name) {
-                    set_setting('ssh_key', '');
+                foreach (projects_all() as $p) {
+                    if (project_setting($p['id'], 'ssh_key') === $name) {
+                        set_project_setting($p['id'], 'ssh_key', '');
+                    }
                 }
                 audit('keys.delete', $name);
                 flash('ok', "Key '$name' deleted.");
@@ -126,8 +136,8 @@ function do_keys(): void
         case 'activate':
             if (valid_key_name($name) && is_file("$dir/$name")) {
                 set_setting('ssh_key', $name);
-                audit('keys.activate', $name);
-                flash('ok', "Key '$name' is now used for git over SSH." . (setting('git_auth') !== 'ssh' ? ' Note: Git auth is not set to "ssh" in Settings.' : ''));
+                audit('keys.activate', current_project()['slug'] . ": $name");
+                flash('ok', "Key '$name' is now used by " . current_project()['name'] . ' for git over SSH.' . (setting('git_auth') !== 'ssh' ? ' Note: Git auth is not set to "ssh" in Settings.' : ''));
             }
             break;
         case 'scan':
